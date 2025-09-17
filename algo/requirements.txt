@@ -1,0 +1,22 @@
+requests
+pandas
+vaderSentiment
+feedparser
+prettytable
+fpdf
+#matplotlib.pyplot   -> changed to matplotlib for render deployment
+matplotlib
+pycoingecko
+flask
+pillow
+scikit-learn
+xgboost 
+seaborn 
+joblib
+scipy
+beautifulsoup4
+python-binance
+textstat
+gensim
+torch
+transformers

@@ -1,0 +1,30 @@
+Flask==2.2.5
+gunicorn==20.1.0
+SQLAlchemy==2.0.0
+psycopg2-binary==2.9.6
+boto3==1.28.0
+python-dotenv==1.0.0
+requests
+
+# add your algo’s dependencies below
+pandas
+vaderSentiment
+feedparser
+prettytable
+fpdf
+#matplotlib.pyplot   -> changed to matplotlib for render deployment
+matplotlib
+pycoingecko
+flask
+pillow
+scikit-learn
+xgboost 
+seaborn 
+joblib
+scipy
+beautifulsoup4
+python-binance
+textstat
+gensim
+torch
+transformers

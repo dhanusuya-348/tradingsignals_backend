@@ -1,0 +1,235 @@
+# logic/signal_engine.py
+from strategies.macd_ema_strategy import macd_ema_signal
+from strategies.rsi_volatility_strategy import rsi_volatility_signal
+from strategies.trend_sentiment_strategy import trend_sentiment_signal
+from strategies.bollinger_squeezer_strategy import bollinger_squeeze_signal
+from strategies.composite_weighted_strategy import composite_weighted_signal
+from indicators.support_resistance import get_support_resistance_levels
+from logic.risk_manager import calculate_risk_management
+
+def evaluate_strategies(df, sentiment, symbol):
+    """Return all strategy signals with confidence (no risk info here)."""
+    return [
+        macd_ema_signal(df, symbol),
+        rsi_volatility_signal(df, symbol),
+        trend_sentiment_signal(df, sentiment, symbol),
+        bollinger_squeeze_signal(df, symbol)
+    ]
+
+def weighted_signal_decision(strategies):
+    """Weighted voting to finalize signal."""
+    weight_map = {"BUY": 0, "SELL": 0, "HOLD": 0}
+    weighted_conf = {"BUY": [], "SELL": [], "HOLD": []}
+
+    for strat in strategies:
+        weight_map[strat["signal"]] += strat["confidence"]
+        weighted_conf[strat["signal"]].append(strat["confidence"])
+
+    final_signal = max(weight_map, key=lambda k: weight_map[k])
+    if not weighted_conf[final_signal]:
+        return "HOLD", 50
+
+    avg_conf = int(sum(weighted_conf[final_signal]) / len(weighted_conf[final_signal]))
+    return final_signal, avg_conf
+
+def generate_signal(price_data, sentiment, symbol, debug=False):
+    total_strategies = []
+
+    for tf, df in price_data.items():
+        if df is None or df.empty or len(df) < 20:
+            continue
+
+        strategies = evaluate_strategies(df, sentiment, symbol)
+
+        # Support/resistance adjustment - reduced penalties for less volatile coins
+        sr_levels = get_support_resistance_levels(df)
+        last_price = df["close"].iloc[-1]
+
+        def near_level(price, levels, tol=0.007):
+            return any(abs(price - level)/price < tol for level in levels)
+
+        # Coin-specific penalty adjustment with reduced penalties
+        less_volatile_coins = ['NEARUSDT', 'ADAUSDT', 'LINKUSDT', 'ICPUSDT', 'DOTUSDT', 'AVAXUSDT', 'MATICUSDT', 'LTCUSDT', 'XRPUSDT']
+        is_less_volatile = any(coin in symbol.upper() for coin in less_volatile_coins)
+        is_icp = 'ICPUSDT' in symbol.upper()
+        
+        if is_icp:
+            penalty = 2  # Reduced penalty for ICP
+        elif is_less_volatile:
+            penalty = 1  # Minimal penalty for other less volatile coins
+        else:
+            penalty = 4  # Keep higher penalty for volatile coins
+
+        for strat in strategies:
+            if strat["signal"] == "BUY" and not near_level(last_price, sr_levels["support"]):
+                strat["confidence"] = max(50, strat["confidence"] - penalty)
+            elif strat["signal"] == "SELL" and not near_level(last_price, sr_levels["resistance"]):
+                strat["confidence"] = max(50, strat["confidence"] - penalty)
+
+        total_strategies.extend(strategies)
+
+    # Composite weighted signal - always include it for better signal diversity
+    composite_signal, composite_conf = composite_weighted_signal(df, sentiment, symbol)
+    total_strategies.append({"strategy": "Composite", "signal": composite_signal, "confidence": composite_conf})
+
+    # Weighted vote
+    final_signal, avg_confidence = weighted_signal_decision(total_strategies)
+
+    # Coin-specific confidence thresholds - reduced for less volatile coins
+    less_volatile_coins = ['NEARUSDT', 'ADAUSDT', 'LINKUSDT', 'ICPUSDT', 'DOTUSDT', 'AVAXUSDT', 'MATICUSDT', 'LTCUSDT', 'XRPUSDT', 'BNBUSDT']
+    is_less_volatile = any(coin in symbol.upper() for coin in less_volatile_coins)
+    is_icp = 'ICPUSDT' in symbol.upper()
+    
+    if is_icp:
+        confidence_threshold = 70  # Reduced threshold for ICP
+    elif is_less_volatile:
+        confidence_threshold = 70  # Significantly reduced threshold for other less volatile coins
+    else:
+        confidence_threshold = 62  # Keep higher threshold for volatile coins
+    
+    if avg_confidence < confidence_threshold:
+        if debug:
+            print(f"[DEBUG] Skipping signal due to low confidence: {avg_confidence} (threshold: {confidence_threshold})")
+        final_signal = "HOLD"
+        avg_confidence = 0
+    else:
+        # Boost confidence for less volatile coins to compensate for their subtlety
+        if is_less_volatile and avg_confidence > 0 and not is_icp:
+            avg_confidence = min(95, avg_confidence + 5)  # Increased boost
+        # ICP gets a moderate boost for strong signals
+        elif is_icp and avg_confidence > 70:
+            avg_confidence = min(95, avg_confidence + 3)
+
+    # Dynamic SL/TP calculation
+    indicators = {"sentiment": 1.0 if sentiment == "bullish" else -1.0, "trend_strength": 0.7, "volatility": "medium"}
+    risk_info = calculate_risk_management(df, final_signal, "medium", indicators, confidence=avg_confidence)
+
+    if debug:
+        print(f"\n[DEBUG] Final Signal: {final_signal}, Confidence: {avg_confidence}")
+        print(f"[DEBUG] Risk Info: {risk_info}")
+        print(f"[DEBUG] Contributing Strategies: {[s['strategy'] for s in total_strategies if s['signal'] == final_signal]}")
+
+    return final_signal, avg_confidence, risk_info
+
+def generate_live_signal(price_data, sentiment, symbol, debug=True):
+    return generate_signal(price_data, sentiment, symbol, debug=debug)
+
+def generate_backtest_signal(price_data, sentiment, symbol, debug=False):
+    return generate_signal(price_data, sentiment, symbol, debug=debug)
+
+
+# # logic/signal_engine.py
+
+# from strategies.macd_ema_strategy import macd_ema_signal
+# from strategies.rsi_volatility_strategy import rsi_volatility_signal
+# from strategies.trend_sentiment_strategy import trend_sentiment_signal
+# from strategies.bollinger_squeezer_strategy import bollinger_squeeze_signal
+# from strategies.composite_weighted_strategy import composite_weighted_signal
+# from indicators.support_resistance import get_support_resistance_levels
+# from logic.risk_manager import calculate_risk_management
+
+# def evaluate_strategies(df, sentiment, symbol):
+#     """Return all strategy signals with confidence (no risk info here)."""
+#     return [
+#         macd_ema_signal(df, symbol),
+#         rsi_volatility_signal(df, symbol),
+#         trend_sentiment_signal(df, sentiment, symbol),
+#         bollinger_squeeze_signal(df, symbol)
+#     ]
+
+# def weighted_signal_decision(strategies):
+#     """Weighted voting to finalize signal."""
+#     weight_map = {"BUY": 0, "SELL": 0, "HOLD": 0}
+#     weighted_conf = {"BUY": [], "SELL": [], "HOLD": []}
+
+#     for strat in strategies:
+#         weight_map[strat["signal"]] += strat["confidence"]
+#         weighted_conf[strat["signal"]].append(strat["confidence"])
+
+#     final_signal = max(weight_map, key=lambda k: weight_map[k])
+#     if not weighted_conf[final_signal]:
+#         return "HOLD", 50
+
+#     avg_conf = int(sum(weighted_conf[final_signal]) / len(weighted_conf[final_signal]))
+#     return final_signal, avg_conf
+
+# def generate_signal(price_data, sentiment, symbol, debug=False):
+#     total_strategies = []
+
+#     for tf, df in price_data.items():
+#         if df is None or df.empty or len(df) < 20:
+#             continue
+
+#         strategies = evaluate_strategies(df, sentiment, symbol)
+
+#         # Support/resistance adjustment - ICP-specific penalties
+#         sr_levels = get_support_resistance_levels(df)
+#         last_price = df["close"].iloc[-1]
+
+#         def near_level(price, levels, tol=0.007):
+#             return any(abs(price - level)/price < tol for level in levels)
+
+#         # Coin-specific penalty adjustment with ICP special handling
+#         less_volatile_coins = ['NEARUSDT', 'ADAUSDT', 'LINKUSDT', 'ICPUSDT', 'DOTUSDT', 'AVAXUSDT', 'MATICUSDT', 'LTCUSDT', 'XRPUSDT']
+#         is_less_volatile = any(coin in symbol.upper() for coin in less_volatile_coins)
+#         is_icp = 'ICPUSDT' in symbol.upper()
+        
+#         if is_icp:
+#             penalty = 3  # Moderate penalty for ICP - between less volatile and volatile
+#         else:
+#             penalty = 2 if is_less_volatile else 4  # Original logic for others
+
+#         for strat in strategies:
+#             if strat["signal"] == "BUY" and not near_level(last_price, sr_levels["support"]):
+#                 strat["confidence"] = max(50, strat["confidence"] - penalty)
+#             elif strat["signal"] == "SELL" and not near_level(last_price, sr_levels["resistance"]):
+#                 strat["confidence"] = max(50, strat["confidence"] - penalty)
+
+#         total_strategies.extend(strategies)
+
+#     # Composite weighted signal - always include it for better signal diversity
+#     composite_signal, composite_conf = composite_weighted_signal(df, sentiment, symbol)
+#     total_strategies.append({"strategy": "Composite", "signal": composite_signal, "confidence": composite_conf})
+
+#     # Weighted vote
+#     final_signal, avg_confidence = weighted_signal_decision(total_strategies)
+
+#     # Coin-specific confidence thresholds with ICP special handling
+#     less_volatile_coins = ['NEARUSDT', 'ADAUSDT', 'LINKUSDT', 'ICPUSDT', 'DOTUSDT', 'AVAXUSDT', 'MATICUSDT', 'LTCUSDT', 'XRPUSDT']
+#     is_less_volatile = any(coin in symbol.upper() for coin in less_volatile_coins)
+#     is_icp = 'ICPUSDT' in symbol.upper()
+    
+#     if is_icp:
+#         confidence_threshold = 62  # Higher threshold for ICP - needs stronger signals
+#     else:
+#         confidence_threshold = 62 if is_less_volatile else 68  # Original logic for others
+    
+#     if avg_confidence < confidence_threshold:
+#         if debug:
+#             print(f"[DEBUG] Skipping signal due to low confidence: {avg_confidence} (threshold: {confidence_threshold})")
+#         final_signal = "HOLD"
+#         avg_confidence = 0
+#     else:
+#         # Boost confidence for less volatile coins to compensate for their subtlety, except ICP
+#         if is_less_volatile and avg_confidence > 0 and not is_icp:
+#             avg_confidence = min(95, avg_confidence + 3)
+#         # ICP gets a smaller boost only for very strong signals
+#         elif is_icp and avg_confidence > 75:
+#             avg_confidence = min(95, avg_confidence + 2)
+
+#     # Dynamic SL/TP calculation
+#     indicators = {"sentiment": 1.0 if sentiment == "bullish" else -1.0, "trend_strength": 0.7, "volatility": "medium"}
+#     risk_info = calculate_risk_management(df, final_signal, "medium", indicators, confidence=avg_confidence)
+
+#     if debug:
+#         print(f"\n[DEBUG] Final Signal: {final_signal}, Confidence: {avg_confidence}")
+#         print(f"[DEBUG] Risk Info: {risk_info}")
+#         print(f"[DEBUG] Contributing Strategies: {[s['strategy'] for s in total_strategies if s['signal'] == final_signal]}")
+
+#     return final_signal, avg_confidence, risk_info
+
+# def generate_live_signal(price_data, sentiment, symbol, debug=True):
+#     return generate_signal(price_data, sentiment, symbol, debug=debug)
+
+# def generate_backtest_signal(price_data, sentiment, symbol, debug=False):
+#     return generate_signal(price_data, sentiment, symbol, debug=debug)

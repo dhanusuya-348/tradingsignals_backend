@@ -1,0 +1,192 @@
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import torch
+import os
+import numpy as np
+import re
+
+from config import RSS_FEEDS, SYMBOL_NAME_MAP
+from data.fetch_news_utils import fetch_rss_headlines
+
+# --- CONFIG: tweak weights here ---
+HEADLINE_WEIGHT = 0.30   # VADER weight on the headline
+ARTICLE_WEIGHT = 0.70    # FinBERT weight on the full article
+FINBERT_MODEL_NAME = "yiyanghkust/finbert-tone"  # good finance tone model
+LOCAL_FINBERT_DIR = os.path.join(os.path.dirname(__file__), "..", "models", "finbert")  # saved copy
+
+# --- FinBERT loader & cache ---
+def load_finbert(model_name=FINBERT_MODEL_NAME, cache_dir=LOCAL_FINBERT_DIR, device=None):
+    os.makedirs(cache_dir, exist_ok=True)
+    try:
+        if os.path.exists(os.path.join(cache_dir, "config.json")) or os.path.exists(os.path.join(cache_dir, "tokenizer.json")):
+            tokenizer = AutoTokenizer.from_pretrained(cache_dir)
+            model = AutoModelForSequenceClassification.from_pretrained(cache_dir)
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = AutoModelForSequenceClassification.from_pretrained(model_name)
+            try:
+                tokenizer.save_pretrained(cache_dir)
+                model.save_pretrained(cache_dir)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"⚠️ Error loading FinBERT: {e}")
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSequenceClassification.from_pretrained(model_name)
+
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device)
+    return tokenizer, model, device
+
+print("📥 Loading FinBERT model (this happens once)...")
+_tokenizer, _finbert_model, _device = load_finbert()
+print("✅ FinBERT ready on device:", _device)
+
+_analyzer = SentimentIntensityAnalyzer()  # VADER
+
+
+def finbert_predict_probs(text, tokenizer=_tokenizer, model=_finbert_model, device=_device):
+    if not text or not text.strip():
+        return {"negative": 0.0, "neutral": 1.0, "positive": 0.0}, 0.0
+    try:
+        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        with torch.no_grad():
+            outputs = model(**inputs)
+            logits = outputs.logits
+            probs = torch.nn.functional.softmax(logits, dim=-1).cpu().numpy()[0]
+    except Exception as e:
+        print(f"⚠️ FinBERT prediction error: {e}")
+        return {"negative": 0.0, "neutral": 1.0, "positive": 0.0}, 0.0
+
+    id2label = getattr(model.config, "id2label", None)
+    if id2label:
+        labels = [id2label[i].lower() for i in sorted(id2label.keys())]
+    else:
+        labels = ["negative", "neutral", "positive"]
+
+    label_probs = {labels[i]: float(probs[i]) for i in range(min(len(labels), len(probs)))}
+    pos = label_probs.get("positive", 0.0)
+    neg = label_probs.get("negative", 0.0)
+    scalar = float(pos - neg)
+    return label_probs, scalar
+
+
+def _is_generic_title(title):
+    if not title or len(title.strip()) < 8:
+        return True
+    t = title.lower()
+    generic_phrases = [
+        "here's what", "here is what", "what happened", "what's happened", 
+        "what happened today", "here's what happened", "in crypto today", 
+        "quick take", "daily roundup", "top news", "what happened in"
+    ]
+    return any(g in t for g in generic_phrases)
+
+
+def make_meaningful_title(orig_title, summary_text):
+    orig_title = (orig_title or "").strip()
+    if orig_title and not _is_generic_title(orig_title):
+        return orig_title
+    if summary_text:
+        sentences = re.split(r'(?<=[.!?])\s+', summary_text.strip())
+        candidate = sentences[0] if sentences else summary_text
+        candidate = candidate.strip()
+        if len(candidate) > 120:
+            candidate = candidate[:120].rsplit(' ', 1)[0] + "..."
+        return candidate[0].upper() + candidate[1:] if candidate else "News"
+    return "News"
+
+
+def extract_pos_neg_lines(summary_text):
+    """
+    Break summary into sentences, run FinBERT on each,
+    return positive and negative ones separately.
+    """
+    if not summary_text:
+        return [], []
+    sentences = re.split(r'(?<=[.!?])\s+', summary_text.strip())
+    positives, negatives = [], []
+    for sent in sentences:
+        if not sent.strip():
+            continue
+        probs, scalar = finbert_predict_probs(sent)
+        if probs["positive"] > 0.5:
+            positives.append(sent.strip())
+        elif probs["negative"] > 0.5:
+            negatives.append(sent.strip())
+    return positives, negatives
+
+
+def get_sentiment_score(symbol, print_news=True, debug=False):
+    coin_symbol = symbol.replace("USDT", "")
+    coin_name, coin_code = SYMBOL_NAME_MAP.get(coin_symbol, (None, None))
+
+    headlines = fetch_rss_headlines(RSS_FEEDS, coin_name, coin_code, extract_full_articles=True)
+    if not headlines:
+        if print_news:
+            print("\n⚠️ No news headlines found for sentiment analysis.\n")
+        return "neutral", []
+
+    scored_headlines = []
+    sum_weighted, count = 0.0, 0
+
+    for item in headlines:
+        title = item.get("title", "") or ""
+        full_text = item.get("full_text") or item.get("summary_news") or item.get("text") or ""
+        base_summary = item.get("summary_news") or ""
+
+        vader_compound = _analyzer.polarity_scores(title)["compound"]
+        probs, finbert_scalar = finbert_predict_probs(full_text)
+
+        score = (HEADLINE_WEIGHT * vader_compound) + (ARTICLE_WEIGHT * finbert_scalar)
+        meaningful_title = make_meaningful_title(title, base_summary)
+
+        # extract positive/negative sentences from the summary
+        pos_lines, neg_lines = extract_pos_neg_lines(base_summary)
+        sentiment_section = ""
+        if pos_lines:
+            sentiment_section += "\n\n🟢 Positive Points:\n- " + "\n- ".join(pos_lines)
+        if neg_lines:
+            sentiment_section += "\n\n🔴 Negative Points:\n- " + "\n- ".join(neg_lines)
+
+        # final summary: full summary + sentiment notes
+        final_summary = base_summary + sentiment_section if base_summary else sentiment_section
+
+        item["title"] = meaningful_title
+        item["orig_title"] = title
+        item["summary_news"] = final_summary
+        item["full_text"] = full_text
+        item["vader_title"] = float(vader_compound)
+        item["finbert_probs"] = probs
+        item["finbert_scalar"] = float(finbert_scalar)
+        item["score"] = float(score)
+        scored_headlines.append(item)
+
+        sum_weighted += score
+        count += 1
+
+        if debug and print_news:
+            print(f"DBG: {meaningful_title[:80]} | vader={vader_compound:.3f} | finbert={finbert_scalar:.3f} | score={score:.3f}")
+
+    aggregate = sum_weighted / count if count else 0.0
+
+    if print_news:
+        print(f"\n📢 Using {len(scored_headlines)} headlines:\n")
+        for i, item in enumerate(scored_headlines[:50], 1):
+            print(f"{i}. {item['title']}")
+            print(f"   {item['summary_news']}")
+            print(f"   Score: {item['score']:.3f} | VADER: {item['vader_title']:.3f} | FinBERT: {item['finbert_scalar']:.3f}")
+            print(f"   Source: {item['source']} | Published: {item['published']}")
+            print(f"   Link: {item['link']}\n")
+        print(f"Aggregate sentiment score = {aggregate:.4f}")
+
+    if aggregate >= 0.20:
+        sentiment_label = "bullish"
+    elif aggregate <= -0.20:
+        sentiment_label = "bearish"
+    else:
+        sentiment_label = "neutral"
+
+    return sentiment_label, scored_headlines

@@ -1,0 +1,25 @@
+# Ignore Python environments
+venv/
+
+# Bytecode / cache
+__pycache__/
+*.pyc
+*.pyo
+
+# VS Code settings
+.vscode/
+
+# Logs and OS junk
+*.log
+.DS_Store
+
+# Reports (optional if you auto-generate them)
+reports/generated_pdfs/
+reports/plots/
+
+# Allow tracking of other files in reports/
+!reports/
+!reports/*.py
+
+models/finbert/
+data/glove_cache/
