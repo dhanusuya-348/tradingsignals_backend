@@ -1,4 +1,1 @@
-web: gunicorn application:app --bind 0.0.0.0:$PORT --workers 4
-signal_worker: python signal_worker.py
-pdf_worker: python pdf_worker.py
-instant_worker: python instant_worker.py
+worker: python instant_worker.py

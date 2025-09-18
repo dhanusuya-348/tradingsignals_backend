@@ -57,5 +57,7 @@ def get_watchlist(user_sub):
     session.close()
     return jsonify(out)
 
+application = app
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
