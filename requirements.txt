@@ -1,6 +1,7 @@
 # Web framework
 Flask==2.2.5
 gunicorn==20.1.0
+flask-cors
 
 # HTTP requests
 requests==2.32.3
