@@ -53,6 +53,24 @@ class UserSignal(Base):
 
     signal = relationship("Signal", back_populates="users")
 
+# Add this User class to your existing models.py
+
+class User(Base):
+    """
+    User profile table to store Cognito user details
+    """
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True)
+    user_sub = Column(String, unique=True, index=True)  # Cognito user ID
+    email = Column(String, unique=True, index=True)     # Email address
+    name = Column(String, nullable=True)                # Display name
+    phone = Column(String, nullable=True)               # Phone number for SMS
+    subscription_status = Column(String, default="free") # free/active/cancelled
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+# Keep all your existing models (Watchlist, Signal, UserSignal) as they are
+
 
 def get_engine_from_env():
     db_url = os.environ.get("DATABASE_URL")
