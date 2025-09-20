@@ -1,7 +1,7 @@
 # strategies/rsi_volatility_strategy.py
-from ..indicators.rsi import calculate_rsi
-from ..indicators.volatility import calculate_volatility
-from ..indicators.trend import identify_trend
+from indicators.rsi import calculate_rsi
+from indicators.volatility import calculate_volatility
+from indicators.trend import identify_trend
 
 def rsi_volatility_signal(df, symbol=""):
     if len(df) < 14:
@@ -112,8 +112,8 @@ def rsi_volatility_signal(df, symbol=""):
 
 
 # # strategies/rsi_volatility_strategy.py
-# from ..indicators.rsi import calculate_rsi
-# from ..indicators.volatility import calculate_volatility
+# from indicators.rsi import calculate_rsi
+# from indicators.volatility import calculate_volatility
 
 # def rsi_volatility_signal(df, symbol=""):
 #     if len(df) < 14:

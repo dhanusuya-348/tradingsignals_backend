@@ -1,5 +1,5 @@
 # strategies/bollinger_squeezer_strategy.py
-from ..indicators.bollinger import calculate_bollinger_bands
+from indicators.bollinger import calculate_bollinger_bands
 import pandas as pd
 
 def bollinger_squeeze_signal(df, symbol=""):
@@ -88,7 +88,7 @@ def bollinger_squeeze_signal(df, symbol=""):
 
 
 # # strategies/bollinger_squeezer_strategy.py
-# from ..indicators.bollinger import calculate_bollinger_bands
+# from indicators.bollinger import calculate_bollinger_bands
 # import pandas as pd
 
 # def bollinger_squeeze_signal(df, symbol=""):

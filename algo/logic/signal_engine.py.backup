@@ -16,13 +16,13 @@ except ImportError:
     import os
     sys.path.append(os.path.dirname(os.path.dirname(__file__)))
     try:
-        from ..strategies.macd_ema_strategy import macd_ema_signal
-        from ..strategies.rsi_volatility_strategy import rsi_volatility_signal
-        from ..strategies.trend_sentiment_strategy import trend_sentiment_signal
-        from ..strategies.bollinger_squeezer_strategy import bollinger_squeeze_signal
-        from ..strategies.composite_weighted_strategy import composite_weighted_signal
-        from ..indicators.support_resistance import get_support_resistance_levels
-        from ..logic.risk_manager import calculate_risk_management
+        from strategies.macd_ema_strategy import macd_ema_signal
+        from strategies.rsi_volatility_strategy import rsi_volatility_signal
+        from strategies.trend_sentiment_strategy import trend_sentiment_signal
+        from strategies.bollinger_squeezer_strategy import bollinger_squeeze_signal
+        from strategies.composite_weighted_strategy import composite_weighted_signal
+        from indicators.support_resistance import get_support_resistance_levels
+        from logic.risk_manager import calculate_risk_management
         print("✅ Signal engine imports successful (fallback)")
     except ImportError as e:
         print(f"❌ Signal engine import error: {e}")

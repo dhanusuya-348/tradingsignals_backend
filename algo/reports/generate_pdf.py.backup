@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from dateutil import parser
 import matplotlib.dates as mdates
 import matplotlib.ticker as mticker
-from ..config import HISTORICAL_LIMIT
+from config import HISTORICAL_LIMIT
 
 def remove_unicode(text):
     return re.sub(r'[^\x00-\x7F]+', '', text)

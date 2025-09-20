@@ -1,17 +1,9 @@
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import torch
 import os
+import numpy as np
 import re
-
-# Safe import for transformers - fallback if not available
-try:
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
-    import torch
-    FINBERT_AVAILABLE = True
-    print("✅ Transformers available - FinBERT enabled")
-except ImportError:
-    print("⚠️ Transformers not available - using VADER-only sentiment analysis")
-    FINBERT_AVAILABLE = False
-    torch = None
 
 # Fix: Import config and fetch_news_utils from correct paths
 try:
@@ -23,8 +15,8 @@ except ImportError:
     import sys
     sys.path.append(os.path.dirname(os.path.dirname(__file__)))
     try:
-        from ..config import RSS_FEEDS, SYMBOL_NAME_MAP
-        from ..data.fetch_news_utils import fetch_rss_headlines
+        from config import RSS_FEEDS, SYMBOL_NAME_MAP
+        from data.fetch_news_utils import fetch_rss_headlines
         print("✅ Config and news utils imported via fallback")
     except ImportError:
         # Final fallback
@@ -32,22 +24,11 @@ except ImportError:
             "https://cryptopanic.com/feed/rss",
             "https://cointelegraph.com/rss",
             "https://www.coindesk.com/arc/outboundfeeds/rss/",
-            "https://www.cryptoglobe.com/latest/feed/",
-            "https://decrypt.co/feed",
-            "https://cryptobriefing.com/feed/",
-            "https://bitcoinmagazine.com/.rss/full/",
         ]
         SYMBOL_NAME_MAP = {
             "BTC": ("Bitcoin", "BTC"),
             "ETH": ("Ethereum", "ETH"),
             "SOL": ("Solana", "SOL"),
-            "ADA": ("Cardano", "ADA"),
-            "AVAX": ("Avalanche", "AVAX"),
-            "DOT": ("Polkadot", "DOT"),
-            "LINK": ("Chainlink", "LINK"),
-            "MATIC": ("Polygon", "MATIC"),
-            "UNI": ("Uniswap", "UNI"),
-            "LTC": ("Litecoin", "LTC"),
         }
         print("⚠️ Using fallback config values for sentiment analysis")
         
@@ -57,21 +38,13 @@ except ImportError:
             return []
 
 # --- CONFIG: tweak weights here ---
-if FINBERT_AVAILABLE:
-    HEADLINE_WEIGHT = 0.30   # VADER weight on the headline
-    ARTICLE_WEIGHT = 0.70    # FinBERT weight on the full article
-else:
-    HEADLINE_WEIGHT = 0.50   # VADER weight on the headline
-    ARTICLE_WEIGHT = 0.50    # VADER weight on the article content (no FinBERT)
-
+HEADLINE_WEIGHT = 0.30   # VADER weight on the headline
+ARTICLE_WEIGHT = 0.70    # FinBERT weight on the full article
 FINBERT_MODEL_NAME = "yiyanghkust/finbert-tone"  # good finance tone model
 LOCAL_FINBERT_DIR = os.path.join(os.path.dirname(__file__), "..", "models", "finbert")  # saved copy
 
-# --- FinBERT loader & cache (only if available) ---
+# --- FinBERT loader & cache ---
 def load_finbert(model_name=FINBERT_MODEL_NAME, cache_dir=LOCAL_FINBERT_DIR, device=None):
-    if not FINBERT_AVAILABLE:
-        return None, None, "cpu"
-        
     os.makedirs(cache_dir, exist_ok=True)
     try:
         if os.path.exists(os.path.join(cache_dir, "config.json")) or os.path.exists(os.path.join(cache_dir, "tokenizer.json")):
@@ -96,54 +69,20 @@ def load_finbert(model_name=FINBERT_MODEL_NAME, cache_dir=LOCAL_FINBERT_DIR, dev
     return tokenizer, model, device
 
 # Initialize FinBERT and VADER
-if FINBERT_AVAILABLE:
-    try:
-        print("📥 Loading FinBERT model (this happens once)...")
-        _tokenizer, _finbert_model, _device = load_finbert()
-        print("✅ FinBERT ready on device:", _device)
-    except Exception as e:
-        print(f"⚠️ FinBERT loading failed: {e}")
-        _tokenizer, _finbert_model, _device = None, None, "cpu"
-        FINBERT_AVAILABLE = False
-else:
+try:
+    print("📥 Loading FinBERT model (this happens once)...")
+    _tokenizer, _finbert_model, _device = load_finbert()
+    print("✅ FinBERT ready on device:", _device)
+except Exception as e:
+    print(f"⚠️ FinBERT loading failed: {e}")
     _tokenizer, _finbert_model, _device = None, None, "cpu"
 
 _analyzer = SentimentIntensityAnalyzer()  # VADER
 
 
-def finbert_predict_probs(text, tokenizer=None, model=None, device=None):
-    """
-    Predict sentiment probabilities using FinBERT.
-    Falls back to VADER if FinBERT is not available.
-    """
-    if not FINBERT_AVAILABLE or not text or not text.strip() or not tokenizer or not model:
-        # Fallback to VADER sentiment analysis
-        if text and text.strip():
-            vader_scores = _analyzer.polarity_scores(text)
-            compound = vader_scores['compound']
-            
-            # Convert VADER compound score to probabilities
-            if compound >= 0.1:
-                pos_prob = min(0.8, (compound + 1) / 2)
-                neg_prob = max(0.1, (1 - compound) / 4)
-            elif compound <= -0.1:
-                neg_prob = min(0.8, (1 - compound) / 2)
-                pos_prob = max(0.1, (compound + 1) / 4)
-            else:
-                pos_prob = 0.3
-                neg_prob = 0.3
-            
-            neutral_prob = 1.0 - pos_prob - neg_prob
-            
-            return {
-                "negative": float(neg_prob),
-                "neutral": float(neutral_prob), 
-                "positive": float(pos_prob)
-            }, float(compound)
-        else:
-            return {"negative": 0.0, "neutral": 1.0, "positive": 0.0}, 0.0
-    
-    # Use FinBERT if available
+def finbert_predict_probs(text, tokenizer=_tokenizer, model=_finbert_model, device=_device):
+    if not text or not text.strip() or not tokenizer or not model:
+        return {"negative": 0.0, "neutral": 1.0, "positive": 0.0}, 0.0
     try:
         inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
         inputs = {k: v.to(device) for k, v in inputs.items()}
@@ -194,38 +133,23 @@ def make_meaningful_title(orig_title, summary_text):
     return "News"
 
 
-def extract_pos_neg_lines_vader(summary_text):
+def extract_pos_neg_lines(summary_text):
     """
-    Break summary into sentences, run sentiment analysis on each,
+    Break summary into sentences, run FinBERT on each,
     return positive and negative ones separately.
-    Uses VADER when FinBERT is not available.
     """
     if not summary_text:
         return [], []
-    
     sentences = re.split(r'(?<=[.!?])\s+', summary_text.strip())
     positives, negatives = [], []
-    
     for sent in sentences:
         if not sent.strip():
             continue
-            
-        if FINBERT_AVAILABLE:
-            probs, scalar = finbert_predict_probs(sent, _tokenizer, _finbert_model, _device)
-            if probs["positive"] > 0.5:
-                positives.append(sent.strip())
-            elif probs["negative"] > 0.5:
-                negatives.append(sent.strip())
-        else:
-            # Use VADER for sentence-level sentiment
-            vader_scores = _analyzer.polarity_scores(sent)
-            compound = vader_scores['compound']
-            
-            if compound > 0.3:
-                positives.append(sent.strip())
-            elif compound < -0.3:
-                negatives.append(sent.strip())
-    
+        probs, scalar = finbert_predict_probs(sent)
+        if probs["positive"] > 0.5:
+            positives.append(sent.strip())
+        elif probs["negative"] > 0.5:
+            negatives.append(sent.strip())
     return positives, negatives
 
 
@@ -247,35 +171,21 @@ def get_sentiment_score(symbol, print_news=True, debug=False):
         full_text = item.get("full_text") or item.get("summary_news") or item.get("text") or ""
         base_summary = item.get("summary_news") or ""
 
-        # Always use VADER for headlines
         vader_compound = _analyzer.polarity_scores(title)["compound"]
-        
-        # Use FinBERT for full text if available, otherwise VADER
-        if FINBERT_AVAILABLE and full_text:
-            probs, finbert_scalar = finbert_predict_probs(full_text, _tokenizer, _finbert_model, _device)
-        else:
-            # Fallback to VADER for full text
-            if full_text:
-                vader_full = _analyzer.polarity_scores(full_text)["compound"]
-            else:
-                vader_full = vader_compound
-            
-            # Mock FinBERT-style output for consistency
-            probs = {"negative": 0.0, "neutral": 1.0, "positive": 0.0}
-            finbert_scalar = vader_full
+        probs, finbert_scalar = finbert_predict_probs(full_text)
 
         score = (HEADLINE_WEIGHT * vader_compound) + (ARTICLE_WEIGHT * finbert_scalar)
         meaningful_title = make_meaningful_title(title, base_summary)
 
-        # Extract positive/negative sentences from the summary
-        pos_lines, neg_lines = extract_pos_neg_lines_vader(base_summary)
+        # extract positive/negative sentences from the summary
+        pos_lines, neg_lines = extract_pos_neg_lines(base_summary)
         sentiment_section = ""
         if pos_lines:
             sentiment_section += "\n\n🟢 Positive Points:\n- " + "\n- ".join(pos_lines)
         if neg_lines:
             sentiment_section += "\n\n🔴 Negative Points:\n- " + "\n- ".join(neg_lines)
 
-        # Final summary: full summary + sentiment notes
+        # final summary: full summary + sentiment notes
         final_summary = base_summary + sentiment_section if base_summary else sentiment_section
 
         item["title"] = meaningful_title
@@ -292,15 +202,19 @@ def get_sentiment_score(symbol, print_news=True, debug=False):
         count += 1
 
         if debug and print_news:
-            analysis_method = "FinBERT" if FINBERT_AVAILABLE else "VADER"
-            print(f"DBG: {meaningful_title[:80]} | vader={vader_compound:.3f} | {analysis_method.lower()}={finbert_scalar:.3f} | score={score:.3f}")
+            print(f"DBG: {meaningful_title[:80]} | vader={vader_compound:.3f} | finbert={finbert_scalar:.3f} | score={score:.3f}")
 
     aggregate = sum_weighted / count if count else 0.0
 
     if print_news:
-        analysis_info = f"📰 Sentiment: {'FinBERT + VADER' if FINBERT_AVAILABLE else 'VADER-only'}"
-        print(f"Total news items collected: {len(scored_headlines)}")
-        print(analysis_info)
+        print(f"\n📢 Using {len(scored_headlines)} headlines:\n")
+        for i, item in enumerate(scored_headlines[:50], 1):
+            print(f"{i}. {item['title']}")
+            print(f"   {item['summary_news']}")
+            print(f"   Score: {item['score']:.3f} | VADER: {item['vader_title']:.3f} | FinBERT: {item['finbert_scalar']:.3f}")
+            print(f"   Source: {item['source']} | Published: {item['published']}")
+            print(f"   Link: {item['link']}\n")
+        print(f"Aggregate sentiment score = {aggregate:.4f}")
 
     if aggregate >= 0.20:
         sentiment_label = "bullish"

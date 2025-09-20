@@ -2,14 +2,14 @@
 
 import pandas as pd
 from datetime import timedelta
-from ..indicators.rsi import calculate_rsi
-from ..indicators.macd import calculate_macd
-from ..indicators.bollinger import calculate_bollinger_bands
-from ..indicators.volatility import calculate_volatility
-from ..logic.risk_manager import calculate_risk_management
-from ..logic.signal_timer import estimate_signal_duration
-from ..logic.signal_engine import generate_live_signal as generate_backtest_signal
-from ..data.fetch_price import fetch_binance_1m_data
+from indicators.rsi import calculate_rsi
+from indicators.macd import calculate_macd
+from indicators.bollinger import calculate_bollinger_bands
+from indicators.volatility import calculate_volatility
+from logic.risk_manager import calculate_risk_management
+from logic.signal_timer import estimate_signal_duration
+from logic.signal_engine import generate_live_signal as generate_backtest_signal
+from data.fetch_price import fetch_binance_1m_data
 
 # Load historical sentiment data
 url = "https://intern-tradingsignals.onrender.com/sentiment/csv"

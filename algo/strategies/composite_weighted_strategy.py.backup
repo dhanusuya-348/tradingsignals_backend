@@ -1,10 +1,10 @@
 # strategies/composite_weighted_strategy.py
-from ..indicators.macd import calculate_macd
-from ..indicators.rsi import calculate_rsi
-from ..indicators.bollinger import calculate_bollinger_bands
-from ..indicators.volatility import calculate_volatility
-from ..indicators.volume import calculate_volume_metrics
-from ..indicators.trend import identify_trend
+from indicators.macd import calculate_macd
+from indicators.rsi import calculate_rsi
+from indicators.bollinger import calculate_bollinger_bands
+from indicators.volatility import calculate_volatility
+from indicators.volume import calculate_volume_metrics
+from indicators.trend import identify_trend
 
 def composite_weighted_signal(df, sentiment, symbol=""):
     score = 0
@@ -216,11 +216,11 @@ def composite_weighted_signal(df, sentiment, symbol=""):
 
 
 # # strategies/composite_weighted_strategy.py
-# from ..indicators.macd import calculate_macd
-# from ..indicators.rsi import calculate_rsi
-# from ..indicators.bollinger import calculate_bollinger_bands
-# from ..indicators.volatility import calculate_volatility
-# from ..indicators.volume import calculate_volume_metrics
+# from indicators.macd import calculate_macd
+# from indicators.rsi import calculate_rsi
+# from indicators.bollinger import calculate_bollinger_bands
+# from indicators.volatility import calculate_volatility
+# from indicators.volume import calculate_volume_metrics
 
 # def composite_weighted_signal(df, sentiment, symbol=""):
 #     score = 0

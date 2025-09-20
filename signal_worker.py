@@ -1,10 +1,28 @@
 # signal_worker.py
 import time
+import sys
+import os
 from datetime import datetime
 from sqlalchemy.exc import IntegrityError
-from models import get_session, Watchlist, Signal, UserSignal
-from algo.runner import generate_live_signal_api   # <<— use runner
-from aws_helpers import send_to_sqs_instant, send_to_sqs_pdf
+
+# Add current directory to Python path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Load environment variables from .env file
+try:
+    from load_env import load_env_file
+    load_env_file()
+except ImportError:
+    print("⚠️ load_env.py not found, using system environment variables")
+
+try:
+    from models import get_session, Watchlist, Signal, UserSignal
+    from algo.runner import generate_live_signal_api   # Import from algo folder
+    from aws_helpers import send_to_sqs_instant, send_to_sqs_pdf
+    print("✅ All imports successful")
+except ImportError as e:
+    print(f"❌ Import error: {e}")
+    print("🔧 Check if all required modules exist")
 
 POLL_INTERVAL = 30  # seconds between checks
 DEFAULT_TIMEFRAME = "1h"  # adjust if you support multiple
@@ -16,13 +34,20 @@ def process_watchlist():
         # get all unique symbols users are watching
         rows = session.query(Watchlist.symbol).distinct().all()
         symbols = [r.symbol for r in rows]
+        
+        print(f"📋 Found symbols in watchlist: {symbols}")
 
         for symbol in symbols:
             try:
+                print(f"🔍 Running algorithm for {symbol}...")
+                
                 # 1. Run algo ONCE per symbol
                 signal_data = generate_live_signal_api(symbol, DEFAULT_TIMEFRAME)
+                print(f"📊 Algorithm result for {symbol}: {signal_data}")
+                
                 # runner returns key "signal" (BUY/SELL/HOLD)
                 if not signal_data or signal_data.get("signal") == "HOLD":
+                    print(f"📊 {symbol}: HOLD signal, skipping...")
                     continue
 
                 created_at = datetime.utcnow().replace(second=0, microsecond=0)
@@ -50,6 +75,8 @@ def process_watchlist():
 
                 # 3. Link all users watching this symbol
                 watchlist_users = session.query(Watchlist).filter_by(symbol=symbol).all()
+                print(f"👥 Found {len(watchlist_users)} users watching {symbol}")
+                
                 for w in watchlist_users:
                     exists = session.query(UserSignal).filter_by(
                         user_sub=w.user_sub,
@@ -90,12 +117,32 @@ def process_watchlist():
 
             except Exception as e:
                 print(f"⚠️ Error processing {symbol}: {e}")
+                import traceback
+                print(f"🔧 Stack trace: {traceback.format_exc()}")
 
+    except Exception as e:
+        print(f"❌ Error in process_watchlist: {e}")
+        import traceback
+        print(f"🔧 Stack trace: {traceback.format_exc()}")
     finally:
         session.close()
 
 
 if __name__ == "__main__":
+    print("🚀 Signal Worker Starting...")
+    print(f"⏱️ Poll interval: {POLL_INTERVAL} seconds")
+    
     while True:
-        process_watchlist()
-        time.sleep(POLL_INTERVAL)
+        try:
+            print(f"\n🔄 Starting watchlist check at {datetime.now()}")
+            process_watchlist()
+            print(f"✅ Watchlist check completed. Sleeping {POLL_INTERVAL}s...")
+            time.sleep(POLL_INTERVAL)
+        except KeyboardInterrupt:
+            print("⏹️ Signal worker stopped by user")
+            break
+        except Exception as e:
+            print(f"❌ Worker loop error: {e}")
+            import traceback
+            print(f"🔧 Stack trace: {traceback.format_exc()}")
+            time.sleep(60)  # Wait longer on errors

@@ -4,7 +4,7 @@ import datetime
 import pandas as pd
 import os
 from data.fetch_sentiment import get_sentiment_score
-from .config import SYMBOL_NAME_MAP
+from config import SYMBOL_NAME_MAP
 
 def log_sentiment():
     os.makedirs("data", exist_ok=True)

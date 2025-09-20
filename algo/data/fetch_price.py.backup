@@ -13,7 +13,7 @@ except ImportError:
     import os
     sys.path.append(os.path.dirname(os.path.dirname(__file__)))
     try:
-        from ..config import BINANCE_BASE_URL, HISTORICAL_LIMIT
+        from config import BINANCE_BASE_URL, HISTORICAL_LIMIT
         print("✅ Config imported successfully")
     except ImportError:
         # Final fallback values

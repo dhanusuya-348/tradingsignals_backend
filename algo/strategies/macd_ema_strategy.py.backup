@@ -1,6 +1,6 @@
 # strategies/macd_ema_strategy.py
-from ..indicators.macd import calculate_macd
-from ..indicators.trend import calculate_ema
+from indicators.macd import calculate_macd
+from indicators.trend import calculate_ema
 
 def macd_ema_signal(df, symbol=""):
     df = df.copy()
@@ -75,8 +75,8 @@ def macd_ema_signal(df, symbol=""):
 
 
 # # strategies/macd_ema_strategy.py
-# from ..indicators.macd import calculate_macd
-# from ..indicators.trend import calculate_ema
+# from indicators.macd import calculate_macd
+# from indicators.trend import calculate_ema
 
 # def macd_ema_signal(df, symbol=""):
 #     df = df.copy()

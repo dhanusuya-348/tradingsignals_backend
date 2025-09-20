@@ -1,5 +1,5 @@
 import numpy as np
-from ..indicators.support_resistance import get_support_resistance_levels
+from indicators.support_resistance import get_support_resistance_levels
 
 # --- Global Commission Constant ---
 COMMISSION_PERCENT = 0.002 # 0.2% Binance commission

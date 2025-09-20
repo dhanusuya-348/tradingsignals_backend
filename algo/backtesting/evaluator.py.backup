@@ -3,7 +3,7 @@
 
 from prettytable import PrettyTable
 import pandas as pd
-from ..config import HISTORICAL_LIMIT
+from config import HISTORICAL_LIMIT
 from datetime import datetime, timedelta
 import numpy as np
 

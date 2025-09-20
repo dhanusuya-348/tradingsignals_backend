@@ -1,3 +1,4 @@
+#application.py - backend code file
 from flask import Flask, request, jsonify
 from models import Base, get_engine_from_env, get_session, Watchlist, Signal, UserSignal, User
 from datetime import datetime
