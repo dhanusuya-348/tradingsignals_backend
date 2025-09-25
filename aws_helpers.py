@@ -24,24 +24,24 @@ SES_FROM = os.environ.get("SES_FROM")  # verified sender email
 def send_to_sqs_instant(message: dict):
     """Push a message to the instant notification SQS queue"""
     if not INSTANT_QUEUE_URL:
-        print("⚠️ INSTANT_QUEUE_URL not set")
+        print("INSTANT_QUEUE_URL not set")
         return
     sqs.send_message(
         QueueUrl=INSTANT_QUEUE_URL,
         MessageBody=json.dumps(message)
     )
-    print(f"📤 Sent instant message to SQS for {message.get('symbol')} (user: {message.get('email')})")
+    print(f"Sent instant message to SQS for {message.get('symbol')} (user: {message.get('email')})")
 
 def send_to_sqs_pdf(message: dict):
     """Push a message to the PDF generation SQS queue"""
     if not PDF_QUEUE_URL:
-        print("⚠️ PDF_QUEUE_URL not set")
+        print("PDF_QUEUE_URL not set")
         return
     sqs.send_message(
         QueueUrl=PDF_QUEUE_URL,
         MessageBody=json.dumps(message)
     )
-    print(f"📤 Sent PDF job to SQS for {message.get('symbol')} (signal_id: {message.get('signal_id')})")
+    print(f"Sent PDF job to SQS for {message.get('symbol')} (signal_id: {message.get('signal_id')})")
 
 # -----------------------------
 # S3 helper
@@ -52,7 +52,7 @@ def upload_pdf_to_s3(local_path: str, key: str) -> str:
         raise RuntimeError("PDF_S3_BUCKET not set")
     s3.upload_file(local_path, S3_BUCKET, key)
     url = f"https://{S3_BUCKET}.s3.amazonaws.com/{key}"
-    print(f"✅ Uploaded PDF to S3: {url}")
+    print(f"Uploaded PDF to S3: {url}")
     return url
 
 # -----------------------------
@@ -62,10 +62,10 @@ def publish_sms(message: str, phone_number: str):
     """Send SMS via SNS"""
     try:
         resp = sns.publish(PhoneNumber=phone_number, Message=message)
-        print(f"✅ SMS sent to {phone_number}")
+        print(f"SMS sent to {phone_number}")
         return resp
     except Exception as e:
-        print(f"⚠️ Failed to send SMS: {e}")
+        print(f"Failed to send SMS: {e}")
 
 def send_email_via_ses(subject: str, to_email: str, body_html: str):
     """Send HTML email via SES"""
@@ -80,7 +80,7 @@ def send_email_via_ses(subject: str, to_email: str, body_html: str):
                 "Body": {"Html": {"Data": body_html}}
             }
         )
-        print(f"✅ Email sent to {to_email}")
+        print(f"Email sent to {to_email}")
         return resp
     except Exception as e:
-        print(f"⚠️ Failed to send email to {to_email}: {e}")
+        print(f"Failed to send email to {to_email}: {e}")

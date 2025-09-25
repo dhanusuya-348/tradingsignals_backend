@@ -224,5 +224,5 @@ def run_backtest(price_df, symbol, interval, headlines, price_data_dict):
     if not df.empty and "timestamp" in df.columns:
         df["Time"] = pd.to_datetime(df["timestamp"])
     else:
-        print("⚠️ Warning: No valid backtest results generated.")
+        print("Warning: No valid backtest results generated.")
     return df

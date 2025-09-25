@@ -7,9 +7,9 @@ try:
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
     import torch
     FINBERT_AVAILABLE = True
-    print("✅ Transformers available - FinBERT enabled")
+    print("Transformers available - FinBERT enabled")
 except ImportError:
-    print("⚠️ Transformers not available - using VADER-only sentiment analysis")
+    print("Transformers not available - using VADER-only sentiment analysis")
     FINBERT_AVAILABLE = False
     torch = None
 
@@ -17,7 +17,7 @@ except ImportError:
 try:
     from ..config import RSS_FEEDS, SYMBOL_NAME_MAP
     from .fetch_news_utils import fetch_rss_headlines
-    print("✅ Config and news utils imported successfully")
+    print("Config and news utils imported successfully")
 except ImportError:
     # Fallback: try direct import with path manipulation
     import sys
@@ -25,7 +25,7 @@ except ImportError:
     try:
         from ..config import RSS_FEEDS, SYMBOL_NAME_MAP
         from ..data.fetch_news_utils import fetch_rss_headlines
-        print("✅ Config and news utils imported via fallback")
+        print("Config and news utils imported via fallback")
     except ImportError:
         # Final fallback
         RSS_FEEDS = [
@@ -49,11 +49,11 @@ except ImportError:
             "UNI": ("Uniswap", "UNI"),
             "LTC": ("Litecoin", "LTC"),
         }
-        print("⚠️ Using fallback config values for sentiment analysis")
+        print("Using fallback config values for sentiment analysis")
         
         # Mock fetch_rss_headlines function
         def fetch_rss_headlines(feeds, coin_name, coin_code, extract_full_articles=False):
-            print(f"⚠️ Mock news fetch for {coin_name} ({coin_code})")
+            print(f"Mock news fetch for {coin_name} ({coin_code})")
             return []
 
 # --- CONFIG: tweak weights here ---
@@ -86,7 +86,7 @@ def load_finbert(model_name=FINBERT_MODEL_NAME, cache_dir=LOCAL_FINBERT_DIR, dev
             except Exception:
                 pass
     except Exception as e:
-        print(f"⚠️ Error loading FinBERT: {e}")
+        print(f"Error loading FinBERT: {e}")
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForSequenceClassification.from_pretrained(model_name)
 
@@ -98,11 +98,11 @@ def load_finbert(model_name=FINBERT_MODEL_NAME, cache_dir=LOCAL_FINBERT_DIR, dev
 # Initialize FinBERT and VADER
 if FINBERT_AVAILABLE:
     try:
-        print("📥 Loading FinBERT model (this happens once)...")
+        print("Loading FinBERT model (this happens once)...")
         _tokenizer, _finbert_model, _device = load_finbert()
-        print("✅ FinBERT ready on device:", _device)
+        print("FinBERT ready on device:", _device)
     except Exception as e:
-        print(f"⚠️ FinBERT loading failed: {e}")
+        print(f"FinBERT loading failed: {e}")
         _tokenizer, _finbert_model, _device = None, None, "cpu"
         FINBERT_AVAILABLE = False
 else:
@@ -152,7 +152,7 @@ def finbert_predict_probs(text, tokenizer=None, model=None, device=None):
             logits = outputs.logits
             probs = torch.nn.functional.softmax(logits, dim=-1).cpu().numpy()[0]
     except Exception as e:
-        print(f"⚠️ FinBERT prediction error: {e}")
+        print(f"FinBERT prediction error: {e}")
         return {"negative": 0.0, "neutral": 1.0, "positive": 0.0}, 0.0
 
     id2label = getattr(model.config, "id2label", None)
@@ -236,7 +236,7 @@ def get_sentiment_score(symbol, print_news=True, debug=False):
     headlines = fetch_rss_headlines(RSS_FEEDS, coin_name, coin_code, extract_full_articles=True)
     if not headlines:
         if print_news:
-            print("\n⚠️ No news headlines found for sentiment analysis.\n")
+            print("\nNo news headlines found for sentiment analysis.\n")
         return "neutral", []
 
     scored_headlines = []
@@ -271,9 +271,9 @@ def get_sentiment_score(symbol, print_news=True, debug=False):
         pos_lines, neg_lines = extract_pos_neg_lines_vader(base_summary)
         sentiment_section = ""
         if pos_lines:
-            sentiment_section += "\n\n🟢 Positive Points:\n- " + "\n- ".join(pos_lines)
+            sentiment_section += "\n\nPositive Points:\n- " + "\n- ".join(pos_lines)
         if neg_lines:
-            sentiment_section += "\n\n🔴 Negative Points:\n- " + "\n- ".join(neg_lines)
+            sentiment_section += "\n\nNegative Points:\n- " + "\n- ".join(neg_lines)
 
         # Final summary: full summary + sentiment notes
         final_summary = base_summary + sentiment_section if base_summary else sentiment_section
@@ -298,7 +298,7 @@ def get_sentiment_score(symbol, print_news=True, debug=False):
     aggregate = sum_weighted / count if count else 0.0
 
     if print_news:
-        analysis_info = f"📰 Sentiment: {'FinBERT + VADER' if FINBERT_AVAILABLE else 'VADER-only'}"
+        analysis_info = f"Sentiment: {'FinBERT + VADER' if FINBERT_AVAILABLE else 'VADER-only'}"
         print(f"Total news items collected: {len(scored_headlines)}")
         print(analysis_info)
 

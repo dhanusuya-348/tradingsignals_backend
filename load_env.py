@@ -12,7 +12,7 @@ def load_env_file():
     env_file = Path(__file__).parent / '.env'
     
     if not env_file.exists():
-        print(f"⚠️ .env file not found at {env_file}")
+        print(f".env file not found at {env_file}")
         return False
     
     try:
@@ -40,7 +40,7 @@ def load_env_file():
                     if key not in os.environ:
                         os.environ[key] = value
         
-        print(f"✅ Loaded environment variables from {env_file}")
+        print(f"Loaded environment variables from {env_file}")
         
         # Verify DATABASE_URL is loaded
         if 'DATABASE_URL' in os.environ:
@@ -49,16 +49,16 @@ def load_env_file():
             if '@' in db_url:
                 masked_url = db_url.split('@')[0].split(':')[:-1]
                 masked_url = ':'.join(masked_url) + ':***@' + db_url.split('@')[1]
-                print(f"✅ DATABASE_URL loaded: {masked_url}")
+                print(f"DATABASE_URL loaded: {masked_url}")
             else:
-                print("✅ DATABASE_URL loaded")
+                print("DATABASE_URL loaded")
         else:
-            print("⚠️ DATABASE_URL not found in .env file")
+            print("DATABASE_URL not found in .env file")
         
         return True
         
     except Exception as e:
-        print(f"❌ Error loading .env file: {e}")
+        print(f"Error loading .env file: {e}")
         return False
 
 # Auto-load when imported
@@ -67,11 +67,11 @@ if __name__ != "__main__":
 
 # Test function
 if __name__ == "__main__":
-    print("🔍 Testing .env loader...")
+    print("Testing .env loader...")
     success = load_env_file()
     
     if success:
-        print("\n📋 Environment variables loaded:")
+        print("\nEnvironment variables loaded:")
         for key in ['DATABASE_URL', 'AWS_REGION', 'BINANCE_API_KEY']:
             value = os.environ.get(key, 'Not set')
             if 'URL' in key or 'KEY' in key:
@@ -80,4 +80,4 @@ if __name__ == "__main__":
                     value = value[:10] + "***"
             print(f"  {key}: {value}")
     else:
-        print("❌ Failed to load .env file")
+        print("Failed to load .env file")

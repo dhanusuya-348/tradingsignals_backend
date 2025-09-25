@@ -9,6 +9,7 @@ requests==2.32.3
 # Data handling
 pandas==2.2.3
 numpy==1.26.4
+pycoingecko=1.1.2
 
 # Sentiment analysis
 vaderSentiment==3.3.2
@@ -20,6 +21,7 @@ scipy==1.13.1
 
 # PDF reports
 fpdf==1.7.2
+prettytable==3.10.2
 
 # Plotting
 matplotlib==3.10.1

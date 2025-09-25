@@ -9,7 +9,7 @@ try:
     from ..strategies.composite_weighted_strategy import composite_weighted_signal
     from ..indicators.support_resistance import get_support_resistance_levels
     from .risk_manager import calculate_risk_management
-    print("✅ Signal engine imports successful (relative)")
+    print("Signal engine imports successful (relative)")
 except ImportError:
     # Fallback: try direct import with path manipulation
     import sys
@@ -23,9 +23,9 @@ except ImportError:
         from strategies.composite_weighted_strategy import composite_weighted_signal
         from indicators.support_resistance import get_support_resistance_levels
         from logic.risk_manager import calculate_risk_management
-        print("✅ Signal engine imports successful (fallback)")
+        print("Signal engine imports successful (fallback)")
     except ImportError as e:
-        print(f"❌ Signal engine import error: {e}")
+        print(f"Signal engine import error: {e}")
         # Create mock functions to prevent crashes
         def macd_ema_signal(df, symbol):
             return {"strategy": "MACD_EMA", "signal": "HOLD", "confidence": 50}
@@ -41,7 +41,7 @@ except ImportError:
             return {"support": [], "resistance": []}
         def calculate_risk_management(df, signal, volatility, indicators, confidence=50):
             return {"risk_level": "medium", "stop_loss": 0.05, "take_profit": 0.10}
-        print("⚠️ Using mock strategy functions")
+        print("Using mock strategy functions")
 
 def evaluate_strategies(df, sentiment, symbol):
     """Return all strategy signals with confidence (no risk info here)."""

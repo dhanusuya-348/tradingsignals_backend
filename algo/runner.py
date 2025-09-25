@@ -1,4 +1,4 @@
-# runner.py
+# algo\runner.py
 import datetime
 import os
 import sys
@@ -36,16 +36,16 @@ def generate_live_signal_api(symbol: str, interval: str):
     Returns JSON-style dict with all signal + risk info.
     """
     try:
-        print(f"🔍 Generating signal for {symbol} ({interval})")
+        print(f"Generating signal for {symbol} ({interval})")
         
         # Fetch price data
         price_df = get_price_data(symbol, interval)
-        print(f"📊 Fetched {len(price_df)} price data points")
+        print(f"Fetched {len(price_df)} price data points")
 
         # Sentiment
         sentiment_score, scored_headlines = get_sentiment_score(symbol, print_news=False)
         sentiment_float = 1.0 if sentiment_score == "bullish" else -1.0 if sentiment_score == "bearish" else 0.0
-        print(f"📰 Sentiment: {sentiment_score}")
+        print(f"Sentiment: {sentiment_score}")
 
         # Indicators
         macd_signal = calculate_macd(price_df)
@@ -56,7 +56,7 @@ def generate_live_signal_api(symbol: str, interval: str):
 
         # Core engine
         final_signal, confidence, strategies = core_generate_live_signal({interval: price_df}, sentiment_score, symbol)
-        print(f"🎯 Core signal: {final_signal} (confidence: {confidence}%)")
+        print(f"Core signal: {final_signal} (confidence: {confidence}%)")
 
         # Risk management
         indicators = {
@@ -74,7 +74,7 @@ def generate_live_signal_api(symbol: str, interval: str):
         if final_signal in ["BUY", "SELL"] and risk_result['risk_level'] not in ['too_weak', 'invalid']:
             final_decision = "APPROVED"
 
-        print(f"✅ Final decision: {final_decision}")
+        print(f"Final decision: {final_decision}")
 
         # Signal duration (only if approved)
         timing_info = {}
@@ -123,13 +123,13 @@ def generate_live_signal_api(symbol: str, interval: str):
             "timestamp": datetime.datetime.utcnow().isoformat(),
         }
         
-        print(f"📋 Signal generated successfully: {result['signal']}")
+        print(f"Signal generated successfully: {result['signal']}")
         return result
         
     except Exception as e:
-        print(f"❌ Error in generate_live_signal_api: {e}")
+        print(f"Error in generate_live_signal_api: {e}")
         import traceback
-        print(f"🔧 Stack trace: {traceback.format_exc()}")
+        print(f"Stack trace: {traceback.format_exc()}")
         
         # Return a basic response to prevent crashes
         return {
@@ -160,7 +160,7 @@ def generate_pdf_report_full(symbol: str, interval: str):
         except Exception as e:
             backtest_df = pd.DataFrame()
             summary = {}
-            print(f"❌ Backtest failed: {e}")
+            print(f"Backtest failed: {e}")
 
         # Step 3: Charts
         plot_backtest_results(backtest_df, "reports/plots/backtest_chart.png")
@@ -185,7 +185,7 @@ def generate_pdf_report_full(symbol: str, interval: str):
         return {"pdf_path": pdf_path, "summary": summary, "signal": result}
         
     except Exception as e:
-        print(f"❌ Error in generate_pdf_report_full: {e}")
+        print(f"Error in generate_pdf_report_full: {e}")
         import traceback
-        print(f"🔧 Stack trace: {traceback.format_exc()}")
+        print(f"Stack trace: {traceback.format_exc()}")
         return {"error": str(e)}

@@ -3,10 +3,15 @@ from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime,
     JSON, Boolean, ForeignKey, UniqueConstraint
 )
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship, scoped_session
+from contextlib import contextmanager
 import os
 
 Base = declarative_base()
+
+# ==========================
+# DATABASE MODELS
+# ==========================
 
 class Watchlist(Base):
     __tablename__ = "watchlists"
@@ -53,7 +58,6 @@ class UserSignal(Base):
 
     signal = relationship("Signal", back_populates="users")
 
-# Add this User class to your existing models.py
 
 class User(Base):
     """
@@ -69,17 +73,44 @@ class User(Base):
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
 
-# Keep all your existing models (Watchlist, Signal, UserSignal) as they are
 
+# ==========================
+# DATABASE ENGINE & SESSIONS
+# ==========================
 
 def get_engine_from_env():
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         raise RuntimeError("DATABASE_URL not set")
-    return create_engine(db_url, pool_pre_ping=True)
 
+    engine = create_engine(
+        db_url,
+        pool_size=5,           # number of persistent connections
+        max_overflow=5,        # extra connections beyond pool_size
+        pool_timeout=30,       # wait time before giving up on a connection
+        pool_recycle=1800,     # recycle connections every 30 minutes
+        pool_pre_ping=True     # check connections before using
+    )
+    return engine
 
+# Thread-safe scoped session
+engine = get_engine_from_env()
+SessionLocal = scoped_session(sessionmaker(bind=engine))
+
+@contextmanager
+def get_session_context():
+    """Context manager for a DB session. Auto commit/rollback/close."""
+    session = SessionLocal()
+    try:
+        yield session
+        session.commit()
+    except:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+# Optional helper for legacy code (not recommended for heavy load)
 def get_session():
-    engine = get_engine_from_env()
-    Session = sessionmaker(bind=engine)
-    return Session()
+    """Return a normal session (without context manager)."""
+    return SessionLocal()

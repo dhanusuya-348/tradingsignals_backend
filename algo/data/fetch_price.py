@@ -14,12 +14,12 @@ except ImportError:
     sys.path.append(os.path.dirname(os.path.dirname(__file__)))
     try:
         from ..config import BINANCE_BASE_URL, HISTORICAL_LIMIT
-        print("✅ Config imported successfully")
+        print("Config imported successfully")
     except ImportError:
         # Final fallback values
         BINANCE_BASE_URL = "https://api.binance.com"
         HISTORICAL_LIMIT = 2500
-        print("⚠️ Using fallback config values")
+        print("Using fallback config values")
 
 def get_price_data(symbol: str, interval: str) -> pd.DataFrame:
     """
@@ -31,7 +31,7 @@ def get_price_data(symbol: str, interval: str) -> pd.DataFrame:
     remaining = HISTORICAL_LIMIT
     limit = 1000  # Binance max per request
 
-    print(f"📊 Fetching {remaining} candles for {symbol} ({interval})")
+    print(f"Fetching {remaining} candles for {symbol} ({interval})")
 
     while remaining > 0:
         fetch_limit = min(remaining, limit)
@@ -47,13 +47,13 @@ def get_price_data(symbol: str, interval: str) -> pd.DataFrame:
             response = requests.get(url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
-            print(f"📊 Fetched {len(data)} candles in this batch")
+            print(f"Fetched {len(data)} candles in this batch")
         except Exception as e:
-            print(f"❌ Error fetching data from Binance: {e}")
+            print(f"Error fetching data from Binance: {e}")
             break
 
         if not data:
-            print("⚠️ No more data available")
+            print("No more data available")
             break
 
         all_data = data + all_data  # Prepend to maintain chronological order
@@ -61,7 +61,7 @@ def get_price_data(symbol: str, interval: str) -> pd.DataFrame:
         remaining -= len(data)
 
     if not all_data:
-        print("⚠️ No data returned.")
+        print("No data returned.")
         return pd.DataFrame()
 
     df = pd.DataFrame(all_data, columns=[
@@ -73,7 +73,7 @@ def get_price_data(symbol: str, interval: str) -> pd.DataFrame:
     df.set_index("timestamp", inplace=True)
     
     result_df = df[["open", "high", "low", "close", "volume"]].astype(float)
-    print(f"✅ Successfully fetched {len(result_df)} total candles for {symbol}")
+    print(f"Successfully fetched {len(result_df)} total candles for {symbol}")
     return result_df
 
 def fetch_binance_1m_data(symbol: str, start_time: datetime, end_time: datetime) -> pd.DataFrame:
@@ -87,7 +87,7 @@ def fetch_binance_1m_data(symbol: str, start_time: datetime, end_time: datetime)
     end_ms = int(end_time.timestamp() * 1000)
     limit = 1000
 
-    print(f"📊 Fetching 1m data for {symbol} from {start_time} to {end_time}")
+    print(f"Fetching 1m data for {symbol} from {start_time} to {end_time}")
 
     while start_ms < end_ms:
         params = {
@@ -103,7 +103,7 @@ def fetch_binance_1m_data(symbol: str, start_time: datetime, end_time: datetime)
             response.raise_for_status()
             data = response.json()
         except Exception as e:
-            print(f"❌ Error fetching 1m data: {e}")
+            print(f"Error fetching 1m data: {e}")
             break
 
         if not data:
@@ -114,7 +114,7 @@ def fetch_binance_1m_data(symbol: str, start_time: datetime, end_time: datetime)
         start_ms = last_time + 60_000  # move forward 1 minute
 
     if not all_candles:
-        print("⚠️ No 1m data returned")
+        print("No 1m data returned")
         return pd.DataFrame()
 
     df = pd.DataFrame(all_candles, columns=[
@@ -127,5 +127,5 @@ def fetch_binance_1m_data(symbol: str, start_time: datetime, end_time: datetime)
     df.set_index("timestamp", inplace=True)
     
     result_df = df[["open", "high", "low", "close", "volume"]].astype(float)
-    print(f"✅ Successfully fetched {len(result_df)} 1m candles for {symbol}")
+    print(f"Successfully fetched {len(result_df)} 1m candles for {symbol}")
     return result_df

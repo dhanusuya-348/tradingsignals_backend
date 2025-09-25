@@ -260,7 +260,7 @@ def plot_price_with_indicators(df, backtest_df, symbol, save_path):
             period_path = f"{base_path}_price_{period_suffix}.png"
             plt.savefig(period_path, dpi=300, bbox_inches='tight', facecolor='white')
             plt.close()
-            print(f"📈 {period_name} chart saved to: {period_path}")
+            print(f"{period_name} chart saved to: {period_path}")
 
     else:
         # If no backtest data, just show price for all periods
@@ -294,9 +294,9 @@ def plot_price_with_indicators(df, backtest_df, symbol, save_path):
             period_path = f"{base_path}_price_{period_suffix}.png"
             plt.savefig(period_path, dpi=300, bbox_inches='tight', facecolor='white')
             plt.close()
-            print(f"📈 {period_name} chart saved to: {period_path}")
+            print(f"{period_name} chart saved to: {period_path}")
 
-    print(f"🎯 All 3 price charts saved separately with suffixes: _early, _middle, _late")
+    print(f"All 3 price charts saved separately with suffixes: _early, _middle, _late")
 
     # Chart 2: Individual Trade P&L bars with Risk/Reward Analysis
     fig, ax = plt.subplots(1, 1, figsize=(16, 9))
@@ -451,7 +451,7 @@ def plot_price_with_indicators(df, backtest_df, symbol, save_path):
                         fontsize=8, fontweight='bold')
             
             # Debug: Print trade data to see what's available
-            print("\n📊 Corrected Trade data summary:")
+            print("\nCorrected Trade data summary:")
             print(f"{'Trade':<5} {'PnL':<8} {'Signal':<4} {'Entry':<8} {'Exit':<8} {'SL%':<8} {'TP%':<8} {'Exit':<4}")
             print("-" * 70)
             for i, row in trade_df.iterrows():
@@ -494,7 +494,7 @@ def plot_price_with_indicators(df, backtest_df, symbol, save_path):
     pnl_path = f"{base_path}_pnl.png"
     plt.savefig(pnl_path, dpi=300, bbox_inches='tight')
     plt.close()
-    print(f"📊 P&L chart saved to: {pnl_path}")
+    print(f"P&L chart saved to: {pnl_path}")
 
     # Chart 3: Cumulative returns (FIXED)
     fig, ax = plt.subplots(1, 1, figsize=(14, 8))
@@ -534,7 +534,7 @@ def plot_price_with_indicators(df, backtest_df, symbol, save_path):
     cumulative_path = f"{base_path}_cumulative.png"
     plt.savefig(cumulative_path, dpi=300, bbox_inches='tight')
     plt.close()
-    print(f"📈 Cumulative returns chart saved to: {cumulative_path}")
+    print(f"Cumulative returns chart saved to: {cumulative_path}")
 
     # Optional: Print verification that both methods now match
     if not backtest_df.empty and 'net_return_percent' in backtest_df.columns:
@@ -547,7 +547,7 @@ def plot_price_with_indicators(df, backtest_df, symbol, save_path):
         chart_result = round(final_return, 2)
         
         print(f"🔍 Verification - Evaluator result: {evaluator_result}%, Chart result: {chart_result}%")
-        print(f"✅ Methods match: {evaluator_result == chart_result}")
+        print(f"Methods match: {evaluator_result == chart_result}")
 
     # Chart 4: Trade summary statistics
     fig, ax = plt.subplots(1, 1, figsize=(10, 8))
@@ -572,16 +572,16 @@ def plot_price_with_indicators(df, backtest_df, symbol, save_path):
     summary_path = f"{base_path}_summary.png"
     plt.savefig(summary_path, dpi=300, bbox_inches='tight')
     plt.close()
-    print(f"📊 Summary chart saved to: {summary_path}")
+    print(f"Summary chart saved to: {summary_path}")
 
-    print(f"🎯 All 4 charts saved as separate files with prefix: {base_path}")
+    print(f"All 4 charts saved as separate files with prefix: {base_path}")
 
 def plot_backtest_results(df, save_path):
     if not isinstance(df, pd.DataFrame):
         raise ValueError(f"Expected DataFrame for backtest results, got {type(df)}")
 
     if df.empty or 'result' not in df.columns:
-        print("⚠️ No backtest data available for plotting.")
+        print("No backtest data available for plotting.")
         return
 
     summary = df['result'].value_counts()
@@ -601,4 +601,4 @@ def plot_backtest_results(df, save_path):
     plt.savefig(save_path, dpi=300)
     plt.close()
 
-    print(f"📊 Backtest pie chart saved to: {save_path}")
+    print(f"Backtest pie chart saved to: {save_path}")

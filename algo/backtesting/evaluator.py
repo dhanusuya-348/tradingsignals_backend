@@ -10,7 +10,7 @@ import numpy as np
 
 def evaluate_backtest_results(df):
     if "result" not in df.columns:
-        print("\n⚠️ No 'result' column in backtest data. Skipping evaluation.")
+        print("\nNo 'result' column in backtest data. Skipping evaluation.")
         return {}
 
     # Calculate actual backtest period based on HISTORICAL_LIMIT and interval
@@ -96,7 +96,7 @@ def evaluate_backtest_results(df):
         "Risk-Adjusted Metrics": f"Volatility: {calculate_volatility(df)}%",
     }
 
-    print("\n📊 Enhanced Backtest Evaluation Report:\n" + "-" * 60)
+    print("\nEnhanced Backtest Evaluation Report:\n" + "-" * 60)
     for k, v in summary.items():
         print(f"{k}: {v}")
     print("-" * 60)
@@ -271,5 +271,5 @@ def print_detailed_backtest_table(df):
             row.get("estimated_duration_minutes", "-")
         ])
 
-    print("\n🧾 Detailed Backtest Table:")
+    print("\nDetailed Backtest Table:")
     print(table)
