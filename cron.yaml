@@ -1,6 +1,0 @@
-version: 1
-cron:
-  - name: "signalWorkerJob"
-    url: "/worker/run"
-    schedule: "* * * * *"   # every 1 min
-    http_method: POST

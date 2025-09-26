@@ -1,8 +1,9 @@
-# algo\runner.py
+# algo/runner.py
 import datetime
 import os
 import sys
 import pandas as pd
+import concurrent.futures
 
 # Add project root to Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -29,36 +30,60 @@ os.makedirs("reports/plots", exist_ok=True)
 os.makedirs("reports/generated_pdfs", exist_ok=True)
 
 
+# -------------------- Timeout Helper --------------------
+def run_with_timeout(func, *args, timeout=20, default=None, **kwargs):
+    """
+    Runs a function with a timeout. If it exceeds, returns default.
+    """
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(func, *args, **kwargs)
+            return future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        print(f"⚠️ Timeout in {func.__name__}, returning default")
+        return default
+    except Exception as e:
+        print(f"⚠️ Error in {func.__name__}: {e}")
+        return default
+
+
+# -------------------- Live Signal --------------------
 def generate_live_signal_api(symbol: str, interval: str):
     """
-    Full live signal generator.
-    Mirrors main.py logic but without interactive input.
+    Full live signal generator with timeouts.
     Returns JSON-style dict with all signal + risk info.
     """
     try:
         print(f"Generating signal for {symbol} ({interval})")
-        
-        # Fetch price data
-        price_df = get_price_data(symbol, interval)
+
+        # Fetch price data (timeout 25s)
+        price_df = run_with_timeout(get_price_data, symbol, interval, timeout=25, default=None)
+        if price_df is None or price_df.empty:
+            raise RuntimeError("Failed to fetch price data")
         print(f"Fetched {len(price_df)} price data points")
 
-        # Sentiment
-        sentiment_score, scored_headlines = get_sentiment_score(symbol, print_news=False)
+        # Sentiment (timeout 15s)
+        sentiment_score, scored_headlines = run_with_timeout(
+            get_sentiment_score, symbol, timeout=15, default=("neutral", [])
+        )
         sentiment_float = 1.0 if sentiment_score == "bullish" else -1.0 if sentiment_score == "bearish" else 0.0
         print(f"Sentiment: {sentiment_score}")
 
-        # Indicators
-        macd_signal = calculate_macd(price_df)
-        rsi_val, rsi_signal = calculate_rsi(price_df)
-        bb_signal = calculate_bollinger_bands(price_df)
-        volatility = calculate_volatility(price_df)
-        volume = calculate_volume_metrics(price_df)
+        # Indicators (timeout 10s each)
+        macd_signal = run_with_timeout(calculate_macd, price_df, timeout=10, default="neutral")
+        rsi_val, rsi_signal = run_with_timeout(calculate_rsi, price_df, timeout=10, default=(50, "neutral"))
+        bb_signal = run_with_timeout(calculate_bollinger_bands, price_df, timeout=10, default="neutral")
+        volatility = run_with_timeout(calculate_volatility, price_df, timeout=10, default=0.0)
+        volume = run_with_timeout(calculate_volume_metrics, price_df, timeout=10, default={})
 
-        # Core engine
-        final_signal, confidence, strategies = core_generate_live_signal({interval: price_df}, sentiment_score, symbol)
+        # Core engine (timeout 20s)
+        final_signal, confidence, strategies = run_with_timeout(
+            core_generate_live_signal, {interval: price_df}, sentiment_score, symbol,
+            timeout=20, default=("HOLD", 0, {})
+        )
         print(f"Core signal: {final_signal} (confidence: {confidence}%)")
 
-        # Risk management
+        # Risk management (timeout 10s)
         indicators = {
             "rsi": rsi_val,
             "macd": macd_signal,
@@ -67,41 +92,38 @@ def generate_live_signal_api(symbol: str, interval: str):
             "sentiment": sentiment_float,
             "trend_strength": 0.6,
         }
-        risk_result = calculate_risk_management(price_df, final_signal, volatility, indicators, confidence)
+        risk_result = run_with_timeout(
+            calculate_risk_management, price_df, final_signal, volatility, indicators, confidence,
+            timeout=10, default={"risk_level": "invalid"}
+        )
 
-        # Final decision (approved/rejected like main.py)
+        # Decision
         final_decision = "REJECTED"
-        if final_signal in ["BUY", "SELL"] and risk_result['risk_level'] not in ['too_weak', 'invalid']:
+        if final_signal in ["BUY", "SELL"] and risk_result.get('risk_level') not in ['too_weak', 'invalid']:
             final_decision = "APPROVED"
-
         print(f"Final decision: {final_decision}")
 
-        # Signal duration (only if approved)
-        timing_info = {}
+        # Signal duration (timeout 10s)
         if final_decision == "APPROVED":
-            duration_minutes = estimate_signal_duration(
+            duration_minutes = run_with_timeout(
+                estimate_signal_duration,
                 signal_type=final_signal,
                 confidence=confidence,
                 trend="uptrend" if macd_signal == "bullish" else "downtrend" if macd_signal == "bearish" else "sideways",
                 sentiment="bullish" if sentiment_float > 0.3 else "bearish" if sentiment_float < -0.3 else "neutral",
                 volatility=volatility,
-                timeframe=interval
+                timeframe=interval,
+                timeout=10,
+                default=30
             )
             start = price_df.index[-1]
             end = start + datetime.timedelta(minutes=duration_minutes)
-            timing_info = {
-                "start": start,
-                "end": end,
-                "duration": f"~{duration_minutes} minutes"
-            }
+            timing_info = {"start": start, "end": end, "duration": f"~{duration_minutes} minutes"}
         else:
             now = datetime.datetime.utcnow()
-            timing_info = {
-                "start": now,
-                "end": now + datetime.timedelta(minutes=30),
-                "duration": "No Duration Calculated"
-            }
+            timing_info = {"start": now, "end": now + datetime.timedelta(minutes=30), "duration": "No Duration Calculated"}
 
+        # Final result
         result = {
             "symbol": symbol,
             "interval": interval,
@@ -122,16 +144,14 @@ def generate_live_signal_api(symbol: str, interval: str):
             "scored_headlines": scored_headlines,
             "timestamp": datetime.datetime.utcnow().isoformat(),
         }
-        
-        print(f"Signal generated successfully: {result['signal']}")
+
+        print(f"✅ Signal generated successfully: {result['signal']}")
         return result
-        
+
     except Exception as e:
-        print(f"Error in generate_live_signal_api: {e}")
+        print(f"❌ Error in generate_live_signal_api: {e}")
         import traceback
         print(f"Stack trace: {traceback.format_exc()}")
-        
-        # Return a basic response to prevent crashes
         return {
             "symbol": symbol,
             "interval": interval,
@@ -142,35 +162,41 @@ def generate_live_signal_api(symbol: str, interval: str):
         }
 
 
+# -------------------- Full PDF Pipeline --------------------
 def generate_pdf_report_full(symbol: str, interval: str):
     """
-    Full pipeline (signal + backtest + plots + PDF).
+    Full pipeline (signal + backtest + plots + PDF) with timeouts.
     Returns dict with PDF path, summary, and signal data.
-    Mirrors main.py end-to-end.
     """
     try:
         # Step 1: Live signal
         result = generate_live_signal_api(symbol, interval)
 
-        # Step 2: Backtest
-        price_df = get_price_data(symbol, interval)
+        # Step 2: Backtest (timeout 30s)
+        price_df = run_with_timeout(get_price_data, symbol, interval, timeout=25, default=pd.DataFrame())
         try:
-            backtest_df = run_backtest(price_df, symbol, interval, result["scored_headlines"], {interval: price_df})
-            summary = evaluate_backtest_results(backtest_df) if not backtest_df.empty else {}
+            backtest_df = run_with_timeout(
+                run_backtest, price_df, symbol, interval, result.get("scored_headlines", []), {interval: price_df},
+                timeout=30, default=pd.DataFrame()
+            )
+            summary = run_with_timeout(
+                evaluate_backtest_results, backtest_df, timeout=10, default={}
+            ) if not backtest_df.empty else {}
         except Exception as e:
             backtest_df = pd.DataFrame()
             summary = {}
             print(f"Backtest failed: {e}")
 
-        # Step 3: Charts
-        plot_backtest_results(backtest_df, "reports/plots/backtest_chart.png")
-        plot_price_with_indicators(price_df, backtest_df, symbol, "reports/plots/price_chart.png")
+        # Step 3: Charts (timeouts 15s)
+        run_with_timeout(plot_backtest_results, backtest_df, "reports/plots/backtest_chart.png", timeout=15, default=None)
+        run_with_timeout(plot_price_with_indicators, price_df, backtest_df, symbol, "reports/plots/price_chart.png", timeout=15, default=None)
 
-        # Step 4: PDF
+        # Step 4: PDF (timeout 30s)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         pdf_path = f"reports/generated_pdfs/{symbol}_{interval}_{result['signal']}_{timestamp}_TradingSignals.pdf"
 
-        create_pdf_report(
+        run_with_timeout(
+            create_pdf_report,
             symbol,
             interval,
             signal_info=result,
@@ -179,13 +205,15 @@ def generate_pdf_report_full(symbol: str, interval: str):
             summary=summary,
             pdf_path=pdf_path,
             backtest_df=backtest_df,
-            scored_headlines=result.get("scored_headlines", [])
+            scored_headlines=result.get("scored_headlines", []),
+            timeout=30,
+            default=None
         )
 
         return {"pdf_path": pdf_path, "summary": summary, "signal": result}
-        
+
     except Exception as e:
-        print(f"Error in generate_pdf_report_full: {e}")
+        print(f"❌ Error in generate_pdf_report_full: {e}")
         import traceback
         print(f"Stack trace: {traceback.format_exc()}")
         return {"error": str(e)}

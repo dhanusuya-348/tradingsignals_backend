@@ -1,9 +1,11 @@
 # signal_worker.py
 import sys
 import os
+import time
 from datetime import datetime
-from sqlalchemy.exc import IntegrityError
 import traceback
+from sqlalchemy.exc import IntegrityError
+from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- Fix Python path so EB can find algo + models ---
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -13,23 +15,43 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
     from load_env import load_env_file
     load_env_file()
-    print("✅ Loaded .env file")
+    print(" Loaded .env file")
 except ImportError:
-    print("ℹ️ load_env.py not found, using system environment variables")
+    print("ℹ load_env.py not found, using system environment variables")
 
-# Import models and helpers (fail fast if broken)
+# Import models and helpers
 try:
     from models import get_session, Watchlist, Signal, UserSignal
     from algo.runner import generate_live_signal_api
     from aws_helpers import send_to_sqs_instant, send_to_sqs_pdf
-    print("✅ All imports successful")
+    print(" All imports successful")
 except Exception as e:
-    print(f"❌ Import error: {e}")
+    print(f" Import error: {e}")
     print(traceback.format_exc())
     raise  # fail fast
 
+
 DEFAULT_TIMEFRAME = "1h"  # adjust if you support multiple
 
+
+# ---------------- Retry Helper ----------------
+def with_retries(func, max_retries=3, delay=5, *args, **kwargs):
+    """
+    Retry wrapper for transient errors.
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            print(f" Attempt {attempt}/{max_retries} failed in {func.__name__}: {e}")
+            if attempt < max_retries:
+                time.sleep(delay)
+            else:
+                print(f" Max retries reached for {func.__name__}")
+                raise
+
+
+# ---------------- Core Logic ----------------
 def process_watchlist():
     """Run the algo for all symbols in watchlist and queue signals."""
     session = get_session()
@@ -38,14 +60,15 @@ def process_watchlist():
         rows = session.query(Watchlist.symbol).distinct().all()
         symbols = [r.symbol for r in rows]
 
-        print(f"📊 Found symbols in watchlist: {symbols}")
+        print(f" Found symbols in watchlist: {symbols}")
 
         for symbol in symbols:
             try:
-                print(f"⚡ Running algorithm for {symbol}...")
+                print(f" Running algorithm for {symbol}...")
 
-                # Run algo once per symbol
-                signal_data = generate_live_signal_api(symbol, DEFAULT_TIMEFRAME)
+                # Run algo once per symbol (with retries)
+                signal_data = with_retries(generate_live_signal_api, 2, 5, symbol, DEFAULT_TIMEFRAME)
+
                 if not signal_data or signal_data.get("signal") == "HOLD":
                     print(f"⏸ {symbol}: HOLD signal, skipping...")
                     continue
@@ -68,13 +91,13 @@ def process_watchlist():
                     )
                     session.add(signal)
                     session.commit()
-                    print(f"🆕 New Signal created for {symbol} at {created_at}")
+                    print(f" New Signal created for {symbol} at {created_at}")
                 else:
-                    print(f"♻️ Reusing existing Signal for {symbol} at {created_at}")
+                    print(f" Reusing existing Signal for {symbol} at {created_at}")
 
                 # Link all users watching this symbol
                 watchlist_users = session.query(Watchlist).filter_by(symbol=symbol).all()
-                print(f"👥 Found {len(watchlist_users)} users watching {symbol}")
+                print(f" Found {len(watchlist_users)} users watching {symbol}")
 
                 new_user_signals = []
                 for w in watchlist_users:
@@ -109,7 +132,7 @@ def process_watchlist():
                             "signal_id": signal.id,
                             "signal": signal.payload
                         })
-                        print(f"📩 Instant signal queued for {u['user_sub']} ({u['email']}) on {symbol}")
+                        print(f" Instant signal queued for {u['user_sub']} ({u['email']}) on {symbol}")
 
                 # Enqueue ONE PDF job (only if not already generated)
                 if not signal.pdf_url:
@@ -118,25 +141,40 @@ def process_watchlist():
                         "symbol": symbol,
                         "timeframe": DEFAULT_TIMEFRAME
                     })
-                    print(f"📑 PDF job queued for {symbol} at {created_at}")
+                    print(f" PDF job queued for {symbol} at {created_at}")
 
             except Exception as e:
-                print(f"❌ Error processing {symbol}: {e}")
+                print(f" Error processing {symbol}: {e}")
                 print(traceback.format_exc())
                 session.rollback()
 
     except Exception as e:
-        print(f"❌ Error in process_watchlist: {e}")
+        print(f" Error in process_watchlist: {e}")
         print(traceback.format_exc())
     finally:
         session.close()
-        print("✅ Database session closed")
+        print("Database session closed")
+
 
 def run_signal_cycle():
-    """One full run triggered by cron or endpoint"""
-    print(f"\n=== 🚀 Starting signal cycle at {datetime.utcnow()} ===")
+    """One full run triggered by scheduler"""
+    print(f"\n=== Starting signal cycle at {datetime.utcnow()} ===")
     process_watchlist()
-    print(f"=== ✅ Signal cycle completed at {datetime.utcnow()} ===")
+    print(f"=== Signal cycle completed at {datetime.utcnow()} ===")
 
+
+# ---------------- Scheduler ----------------
 if __name__ == "__main__":
-    run_signal_cycle()
+    scheduler = BackgroundScheduler()
+    # Run every 5 minutes (adjust interval as needed)
+    scheduler.add_job(run_signal_cycle, "interval", minutes=5, next_run_time=datetime.utcnow())
+    scheduler.start()
+
+    print("Signal worker running with APScheduler (interval = 5 min)")
+    try:
+        # Keep alive
+        while True:
+            time.sleep(60)
+    except (KeyboardInterrupt, SystemExit):
+        scheduler.shutdown()
+        print("Signal worker stopped")
