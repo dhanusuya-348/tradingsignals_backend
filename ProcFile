@@ -1,1 +1,1 @@
-worker: python signal_worker.py
+worker: python pdf_worker.py
