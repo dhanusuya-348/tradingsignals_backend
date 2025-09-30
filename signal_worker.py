@@ -65,12 +65,16 @@ def process_watchlist():
                         print(f"[{datetime.utcnow()}] ⚠ No signal data for {symbol}, skipping...")
                         continue
 
+                    sig_type = signal_data.get("signal", "HOLD")
+                    if sig_type not in ["BUY", "SELL"]:
+                        print(f"[{datetime.utcnow()}] Signal is HOLD for {symbol}, skipping DB insert...")
+                        continue  # skip HOLD signals
+
                     # Ensure payload is JSON-serializable
                     signal_payload = json.loads(json.dumps(signal_data, default=str))
-
                     created_at = datetime.utcnow().replace(second=0, microsecond=0)
 
-                    # --- Store HOLD signals too ---
+                    # --- Insert BUY/SELL signal ---
                     signal = session.query(Signal).filter_by(
                         symbol=symbol,
                         timeframe=DEFAULT_TIMEFRAME,
@@ -86,7 +90,6 @@ def process_watchlist():
                         )
                         session.add(signal)
                         session.commit()
-                        sig_type = signal_data.get("signal", "HOLD")
                         print(f"[{datetime.utcnow()}] New {sig_type} Signal created for {symbol} at {created_at}")
                     else:
                         print(f"[{datetime.utcnow()}] Reusing existing Signal for {symbol} at {created_at}")
