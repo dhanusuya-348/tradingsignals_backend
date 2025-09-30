@@ -1,4 +1,4 @@
-# models.py
+#models.py
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime,
     JSON, Boolean, ForeignKey, UniqueConstraint
@@ -16,11 +16,14 @@ Base = declarative_base()
 class Watchlist(Base):
     __tablename__ = "watchlists"
     id = Column(Integer, primary_key=True)
-    user_sub = Column(String, index=True)   # Cognito user ID
-    email = Column(String, index=True)      # store email for notifications
-    symbol = Column(String, index=True)
+    user_sub = Column(String, index=True, nullable=False)   # Cognito user ID
+    email = Column(String, index=True, nullable=False)      # store email for notifications
+    symbol = Column(String, index=True, nullable=False)
+    #phone = Column(String, nullable=True)                   # optional phone for SMS
     created_at = Column(DateTime, nullable=False)
 
+    def __repr__(self):
+        return f"<Watchlist(user_sub={self.user_sub}, symbol={self.symbol})>"
 
 class Signal(Base):
     """
@@ -29,20 +32,21 @@ class Signal(Base):
     """
     __tablename__ = "signals"
     id = Column(Integer, primary_key=True)
-    symbol = Column(String, index=True)
-    timeframe = Column(String, index=True)  # e.g., "1h", "4h"
-    payload = Column(JSON)                  # JSON blob from algo
+    symbol = Column(String, index=True, nullable=False)
+    timeframe = Column(String, index=True, nullable=False, default="1h")  # default 1h timeframe
+    payload = Column(JSON, nullable=True)                  # JSON blob from algo
     created_at = Column(DateTime, nullable=False)
-    pdf_url = Column(String, nullable=True) # S3 URL if PDF generated
+    pdf_url = Column(String, nullable=True)               # S3 URL if PDF generated
 
-    # Ensure uniqueness of signal per symbol+timeframe+created_at minute
     __table_args__ = (
         UniqueConstraint("symbol", "timeframe", "created_at", name="uq_signal_per_coin_tf_time"),
     )
 
     # relationship to users
-    users = relationship("UserSignal", back_populates="signal")
+    users = relationship("UserSignal", back_populates="signal", cascade="all, delete-orphan")
 
+    def __repr__(self):
+        return f"<Signal(symbol={self.symbol}, timeframe={self.timeframe}, created_at={self.created_at})>"
 
 class UserSignal(Base):
     """
@@ -51,13 +55,15 @@ class UserSignal(Base):
     """
     __tablename__ = "user_signals"
     id = Column(Integer, primary_key=True)
-    user_sub = Column(String, index=True)   # Cognito ID
-    email = Column(String, index=True)      # Email address
-    signal_id = Column(Integer, ForeignKey("signals.id"))
-    delivery_status = Column(String, default="pending")  # pending/sent/failed
+    user_sub = Column(String, index=True, nullable=False)   # Cognito ID
+    email = Column(String, index=True, nullable=False)      # Email address
+    signal_id = Column(Integer, ForeignKey("signals.id"), nullable=False)
+    delivery_status = Column(String, default="pending", nullable=False)  # pending/sent/failed
 
     signal = relationship("Signal", back_populates="users")
 
+    def __repr__(self):
+        return f"<UserSignal(user_sub={self.user_sub}, signal_id={self.signal_id}, status={self.delivery_status})>"
 
 class User(Base):
     """
@@ -65,14 +71,16 @@ class User(Base):
     """
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
-    user_sub = Column(String, unique=True, index=True)  # Cognito user ID
-    email = Column(String, unique=True, index=True)     # Email address
-    name = Column(String, nullable=True)                # Display name
-    phone = Column(String, nullable=True)               # Phone number for SMS
-    subscription_status = Column(String, default="free") # free/active/cancelled
+    user_sub = Column(String, unique=True, index=True, nullable=False)  # Cognito user ID
+    email = Column(String, unique=True, index=True, nullable=False)     # Email address
+    name = Column(String, nullable=True)                                # Display name
+    phone = Column(String, nullable=True)                               # Phone number for SMS
+    subscription_status = Column(String, default="free", nullable=False) # free/active/cancelled
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
 
+    def __repr__(self):
+        return f"<User(user_sub={self.user_sub}, email={self.email})>"
 
 # ==========================
 # DATABASE ENGINE & SESSIONS
@@ -110,7 +118,6 @@ def get_session_context():
     finally:
         session.close()
 
-# Optional helper for legacy code (not recommended for heavy load)
 def get_session():
     """Return a normal session (without context manager)."""
     return SessionLocal()

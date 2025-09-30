@@ -40,10 +40,10 @@ def run_with_timeout(func, *args, timeout=20, default=None, **kwargs):
             future = executor.submit(func, *args, **kwargs)
             return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
-        print(f"⚠️ Timeout in {func.__name__}, returning default")
+        print(f"Timeout in {func.__name__}, returning default")
         return default
     except Exception as e:
-        print(f"⚠️ Error in {func.__name__}: {e}")
+        print(f"Error in {func.__name__}: {e}")
         return default
 
 
@@ -145,11 +145,11 @@ def generate_live_signal_api(symbol: str, interval: str):
             "timestamp": datetime.datetime.utcnow().isoformat(),
         }
 
-        print(f"✅ Signal generated successfully: {result['signal']}")
+        print(f"Signal generated successfully: {result['signal']}")
         return result
 
     except Exception as e:
-        print(f"❌ Error in generate_live_signal_api: {e}")
+        print(f"Error in generate_live_signal_api: {e}")
         import traceback
         print(f"Stack trace: {traceback.format_exc()}")
         return {
@@ -213,7 +213,7 @@ def generate_pdf_report_full(symbol: str, interval: str):
         return {"pdf_path": pdf_path, "summary": summary, "signal": result}
 
     except Exception as e:
-        print(f"❌ Error in generate_pdf_report_full: {e}")
+        print(f"Error in generate_pdf_report_full: {e}")
         import traceback
         print(f"Stack trace: {traceback.format_exc()}")
         return {"error": str(e)}

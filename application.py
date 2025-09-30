@@ -1,4 +1,4 @@
-# application.py - backend code file
+#application.py
 from flask import Flask, request, jsonify
 from models import Base, get_engine_from_env, get_session_context, Watchlist, Signal, UserSignal, User
 from datetime import datetime
@@ -6,43 +6,31 @@ from flask_cors import CORS
 from sqlalchemy import desc
 import traceback
 
-# Import the worker function
-from signal_worker import process_watchlist
-
 application = Flask(__name__)
 
-# Enable CORS for your Amplify frontend
+# Enable CORS for Amplify frontend
 CORS(
     application,
-    resources={r"/*": {"origins": ["https://main.d2lu8gx2f335fg.amplifyapp.com", "http://localhost:3000"]}},
+    resources={r"/*": {"origins": [
+        "https://main.d2lu8gx2f335fg.amplifyapp.com",
+        "http://localhost:3000"
+    ]}},
     supports_credentials=True,
     allow_headers=["Content-Type", "Authorization", "X-Amz-Date", "X-Api-Key"]
 )
 
-# Create tables at startup (for dev; in prod use migrations)
+# Create tables at startup (for dev only; in prod use migrations)
 engine = get_engine_from_env()
 Base.metadata.create_all(engine)
 
 # ======================
-# HEALTH CHECK ROUTE
+# HEALTH CHECK
 # ======================
 @application.route("/health")
 def health():
     return {"status": "ok"}
 
-# ======================
-# CRON WORKER ROUTE
-# ======================
-@application.route("/worker/run", methods=["POST"])
-def run_worker():
-    """Triggered by EB cron.yaml every minute"""
-    try:
-        process_watchlist()
-        return jsonify({"ok": True, "message": "Worker ran successfully"}), 200
-    except Exception as e:
-        print("Worker error:", e)
-        print(traceback.format_exc())
-        return jsonify({"ok": False, "error": str(e)}), 500
+# Removed /worker/run route – not needed anymore.
 
 # ======================
 # PROFILE ROUTES
@@ -326,5 +314,5 @@ def cancel_subscription():
     except Exception as e:
         return {"error": str(e)}, 500
 
-if __name__ == "__main__":
+if __name__ == "_main_":
     application.run(host="0.0.0.0", port=5000)
