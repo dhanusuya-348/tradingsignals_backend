@@ -59,7 +59,7 @@ def process_watchlist():
             for symbol in symbols:
                 try:
                     print(f"[{datetime.utcnow()}] Running algorithm for {symbol}...")
-                    signal_data = with_retries(generate_live_signal_api, 2, 5, symbol, DEFAULT_TIMEFRAME)
+                    signal_data = with_retries(generate_live_signal_api, 2, 5, symbol)
 
                     if not signal_data:
                         print(f"[{datetime.utcnow()}] ⚠ No signal data for {symbol}, skipping...")

@@ -27,28 +27,24 @@ def run_worker():
         log(f"Failed to run signal_worker.py: {e}")
         log(traceback.format_exc())
 
-def wait_until_next_hour():
-    """Sleep until the start of the next UTC hour."""
-    now = datetime.utcnow()
-    next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
-    delta = (next_hour - now).total_seconds()
-    log(f"Sleeping {int(delta)} seconds until next UTC hour ({next_hour})...")
-    time.sleep(delta)
+def wait_until_next_cycle(interval_minutes=10):
+    """Sleep for interval_minutes."""
+    log(f"Sleeping {interval_minutes} minutes until next cycle...")
+    time.sleep(interval_minutes * 60)
 
 def shutdown_handler(signum, frame):
     log(f"Scheduler received signal {signum}, exiting gracefully...")
     exit(0)
 
 if __name__ == "__main__":
-    # Handle termination signals (EB worker stop/restart)
     signal.signal(signal.SIGTERM, shutdown_handler)
     signal.signal(signal.SIGINT, shutdown_handler)
 
-    log("Scheduler started. Will trigger signal_worker.py at the start of each UTC hour.")
+    log("Scheduler started. Will trigger signal_worker.py every 10 minutes.")
     try:
         while True:
             run_worker()
-            wait_until_next_hour()
+            wait_until_next_cycle(10)  # 10-minute interval
     except Exception as e:
         log(f"Unexpected error in scheduler loop: {e}")
         log(traceback.format_exc())
