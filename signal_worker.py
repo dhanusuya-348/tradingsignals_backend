@@ -30,7 +30,7 @@ except Exception as e:
     print(traceback.format_exc())
     raise  # fail fast
 
-DEFAULT_TIMEFRAME = "1h"
+DEFAULT_TIMEFRAME = "10m"
 
 # ---------------- Retry Helper ----------------
 def with_retries(func, max_retries=3, delay=5, *args, **kwargs):

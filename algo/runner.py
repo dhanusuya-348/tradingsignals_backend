@@ -21,7 +21,6 @@ from .logic.risk_manager import calculate_risk_management
 from .logic.signal_timer import estimate_signal_duration
 from .backtesting.backtester import run_backtest
 from .backtesting.evaluator import evaluate_backtest_results
-from .data.fetch_news_utils import fetch_rss_headlines
 from .reports.visualization import plot_backtest_results, plot_price_with_indicators
 from .reports.generate_pdf import create_pdf_report
 
@@ -32,9 +31,7 @@ os.makedirs("reports/generated_pdfs", exist_ok=True)
 
 # -------------------- Timeout Helper --------------------
 def run_with_timeout(func, *args, timeout=20, default=None, **kwargs):
-    """
-    Runs a function with a timeout. If it exceeds, returns default.
-    """
+    """Runs a function with a timeout. If it exceeds, returns default."""
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(func, *args, **kwargs)
@@ -48,42 +45,53 @@ def run_with_timeout(func, *args, timeout=20, default=None, **kwargs):
 
 
 # -------------------- Live Signal --------------------
-def generate_live_signal_api(symbol: str, interval: str):
+def generate_live_signal_api(symbol: str):
     """
-    Full live signal generator with timeouts.
+    Full live signal generator using multi-timeframe (10m main, 5m LTF, 1h HTF).
     Returns JSON-style dict with all signal + risk info.
     """
     try:
-        print(f"Generating signal for {symbol} ({interval})")
+        print(f"Generating signal for {symbol} (10m current timeframe)")
 
-        # Fetch price data (timeout 25s)
-        price_df = run_with_timeout(get_price_data, symbol, interval, timeout=25, default=None)
-        if price_df is None or price_df.empty:
-            raise RuntimeError("Failed to fetch price data")
-        print(f"Fetched {len(price_df)} price data points")
+        # Define timeframes
+        main_tf = "10m"
+        ltf = "5m"
+        htf = "1h"
+        timeframes = [ltf, main_tf, htf]
 
-        # Sentiment (timeout 15s)
+        # Fetch price data for all timeframes
+        price_data = {}
+        for tf in timeframes:
+            df = run_with_timeout(get_price_data, symbol, tf, timeout=25, default=None)
+            if df is None or df.empty:
+                raise RuntimeError(f"Failed to fetch price data for {tf}")
+            price_data[tf] = df
+            print(f"Fetched {len(df)} data points for {tf}")
+
+        price_df = price_data[main_tf]  # use 10m as the base
+
+        # Sentiment
         sentiment_score, scored_headlines = run_with_timeout(
             get_sentiment_score, symbol, timeout=15, default=("neutral", [])
         )
         sentiment_float = 1.0 if sentiment_score == "bullish" else -1.0 if sentiment_score == "bearish" else 0.0
         print(f"Sentiment: {sentiment_score}")
 
-        # Indicators (timeout 10s each)
+        # Indicators (10m base)
         macd_signal = run_with_timeout(calculate_macd, price_df, timeout=10, default="neutral")
         rsi_val, rsi_signal = run_with_timeout(calculate_rsi, price_df, timeout=10, default=(50, "neutral"))
         bb_signal = run_with_timeout(calculate_bollinger_bands, price_df, timeout=10, default="neutral")
         volatility = run_with_timeout(calculate_volatility, price_df, timeout=10, default=0.0)
         volume = run_with_timeout(calculate_volume_metrics, price_df, timeout=10, default={})
 
-        # Core engine (timeout 20s)
+        # Core signal engine (multi-timeframe input)
         final_signal, confidence, strategies = run_with_timeout(
-            core_generate_live_signal, {interval: price_df}, sentiment_score, symbol,
+            core_generate_live_signal, price_data, sentiment_score, symbol,
             timeout=20, default=("HOLD", 0, {})
         )
         print(f"Core signal: {final_signal} (confidence: {confidence}%)")
 
-        # Risk management (timeout 10s)
+        # Risk management
         indicators = {
             "rsi": rsi_val,
             "macd": macd_signal,
@@ -103,7 +111,7 @@ def generate_live_signal_api(symbol: str, interval: str):
             final_decision = "APPROVED"
         print(f"Final decision: {final_decision}")
 
-        # Signal duration (timeout 10s)
+        # Signal duration
         if final_decision == "APPROVED":
             duration_minutes = run_with_timeout(
                 estimate_signal_duration,
@@ -112,7 +120,7 @@ def generate_live_signal_api(symbol: str, interval: str):
                 trend="uptrend" if macd_signal == "bullish" else "downtrend" if macd_signal == "bearish" else "sideways",
                 sentiment="bullish" if sentiment_float > 0.3 else "bearish" if sentiment_float < -0.3 else "neutral",
                 volatility=volatility,
-                timeframe=interval,
+                timeframe=main_tf,
                 timeout=10,
                 default=30
             )
@@ -126,7 +134,9 @@ def generate_live_signal_api(symbol: str, interval: str):
         # Final result
         result = {
             "symbol": symbol,
-            "interval": interval,
+            "interval": main_tf,
+            "ltf": ltf,
+            "htf": htf,
             "signal": final_signal,
             "confidence": confidence,
             "sentiment": sentiment_score,
@@ -154,7 +164,7 @@ def generate_live_signal_api(symbol: str, interval: str):
         print(f"Stack trace: {traceback.format_exc()}")
         return {
             "symbol": symbol,
-            "interval": interval,
+            "interval": "10m",
             "signal": "HOLD",
             "confidence": 0,
             "error": str(e),
@@ -163,20 +173,20 @@ def generate_live_signal_api(symbol: str, interval: str):
 
 
 # -------------------- Full PDF Pipeline --------------------
-def generate_pdf_report_full(symbol: str, interval: str):
+def generate_pdf_report_full(symbol: str):
     """
     Full pipeline (signal + backtest + plots + PDF) with timeouts.
-    Returns dict with PDF path, summary, and signal data.
+    Runs on 10m main timeframe.
     """
     try:
         # Step 1: Live signal
-        result = generate_live_signal_api(symbol, interval)
+        result = generate_live_signal_api(symbol)
 
-        # Step 2: Backtest (timeout 30s)
-        price_df = run_with_timeout(get_price_data, symbol, interval, timeout=25, default=pd.DataFrame())
+        # Step 2: Backtest (10m base)
+        price_df = run_with_timeout(get_price_data, symbol, "10m", timeout=25, default=pd.DataFrame())
         try:
             backtest_df = run_with_timeout(
-                run_backtest, price_df, symbol, interval, result.get("scored_headlines", []), {interval: price_df},
+                run_backtest, price_df, symbol, "10m", result.get("scored_headlines", []), {"10m": price_df},
                 timeout=30, default=pd.DataFrame()
             )
             summary = run_with_timeout(
@@ -187,18 +197,18 @@ def generate_pdf_report_full(symbol: str, interval: str):
             summary = {}
             print(f"Backtest failed: {e}")
 
-        # Step 3: Charts (timeouts 15s)
+        # Step 3: Charts
         run_with_timeout(plot_backtest_results, backtest_df, "reports/plots/backtest_chart.png", timeout=15, default=None)
         run_with_timeout(plot_price_with_indicators, price_df, backtest_df, symbol, "reports/plots/price_chart.png", timeout=15, default=None)
 
-        # Step 4: PDF (timeout 30s)
+        # Step 4: PDF
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        pdf_path = f"reports/generated_pdfs/{symbol}_{interval}_{result['signal']}_{timestamp}_TradingSignals.pdf"
+        pdf_path = f"reports/generated_pdfs/{symbol}_10m_{result['signal']}_{timestamp}_TradingSignals.pdf"
 
         run_with_timeout(
             create_pdf_report,
             symbol,
-            interval,
+            "10m",
             signal_info=result,
             risk_info=result.get("risk", {}),
             timing_info=result.get("timing", {}),
