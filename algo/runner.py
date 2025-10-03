@@ -47,14 +47,14 @@ def run_with_timeout(func, *args, timeout=20, default=None, **kwargs):
 # -------------------- Live Signal --------------------
 def generate_live_signal_api(symbol: str):
     """
-    Full live signal generator using multi-timeframe (10m main, 5m LTF, 1h HTF).
+    Full live signal generator using multi-timeframe (15m main, 5m LTF, 1h HTF).
     Returns JSON-style dict with all signal + risk info.
     """
     try:
-        print(f"Generating signal for {symbol} (10m current timeframe)")
+        print(f"Generating signal for {symbol} (15m current timeframe)")
 
         # Define timeframes
-        main_tf = "10m"
+        main_tf = "15m"
         ltf = "5m"
         htf = "1h"
         timeframes = [ltf, main_tf, htf]
@@ -68,7 +68,7 @@ def generate_live_signal_api(symbol: str):
             price_data[tf] = df
             print(f"Fetched {len(df)} data points for {tf}")
 
-        price_df = price_data[main_tf]  # use 10m as the base
+        price_df = price_data[main_tf]  # use 15m as the base
 
         # Sentiment
         sentiment_score, scored_headlines = run_with_timeout(
@@ -77,7 +77,7 @@ def generate_live_signal_api(symbol: str):
         sentiment_float = 1.0 if sentiment_score == "bullish" else -1.0 if sentiment_score == "bearish" else 0.0
         print(f"Sentiment: {sentiment_score}")
 
-        # Indicators (10m base)
+        # Indicators (15m base)
         macd_signal = run_with_timeout(calculate_macd, price_df, timeout=10, default="neutral")
         rsi_val, rsi_signal = run_with_timeout(calculate_rsi, price_df, timeout=10, default=(50, "neutral"))
         bb_signal = run_with_timeout(calculate_bollinger_bands, price_df, timeout=10, default="neutral")
@@ -164,7 +164,7 @@ def generate_live_signal_api(symbol: str):
         print(f"Stack trace: {traceback.format_exc()}")
         return {
             "symbol": symbol,
-            "interval": "10m",
+            "interval": "15m",
             "signal": "HOLD",
             "confidence": 0,
             "error": str(e),
@@ -176,17 +176,17 @@ def generate_live_signal_api(symbol: str):
 def generate_pdf_report_full(symbol: str):
     """
     Full pipeline (signal + backtest + plots + PDF) with timeouts.
-    Runs on 10m main timeframe.
+    Runs on 15m main timeframe.
     """
     try:
         # Step 1: Live signal
         result = generate_live_signal_api(symbol)
 
-        # Step 2: Backtest (10m base)
-        price_df = run_with_timeout(get_price_data, symbol, "10m", timeout=25, default=pd.DataFrame())
+        # Step 2: Backtest (15m base)
+        price_df = run_with_timeout(get_price_data, symbol, "15m", timeout=25, default=pd.DataFrame())
         try:
             backtest_df = run_with_timeout(
-                run_backtest, price_df, symbol, "10m", result.get("scored_headlines", []), {"10m": price_df},
+                run_backtest, price_df, symbol, "15m", result.get("scored_headlines", []), {"15m": price_df},
                 timeout=30, default=pd.DataFrame()
             )
             summary = run_with_timeout(
@@ -203,12 +203,12 @@ def generate_pdf_report_full(symbol: str):
 
         # Step 4: PDF
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        pdf_path = f"reports/generated_pdfs/{symbol}_10m_{result['signal']}_{timestamp}_TradingSignals.pdf"
+        pdf_path = f"reports/generated_pdfs/{symbol}_15m_{result['signal']}_{timestamp}_TradingSignals.pdf"
 
         run_with_timeout(
             create_pdf_report,
             symbol,
-            "10m",
+            "15m",
             signal_info=result,
             risk_info=result.get("risk", {}),
             timing_info=result.get("timing", {}),
