@@ -70,11 +70,13 @@ def process_all_coins():
                     continue
 
                 sig_type = signal_data.get("signal", "HOLD")
-                # You can still store HOLD signals if desired
-                if sig_type not in ["BUY", "SELL"]:
-                    print(f"[{datetime.utcnow()}] Signal is HOLD for {symbol}, storing as processed=False")
 
-                # Ensure payload is JSON-serializable
+                # Only store BUY or SELL signals
+                if sig_type not in ["BUY", "SELL"]:
+                    print(f"[{datetime.utcnow()}] ⚠ Signal is HOLD for {symbol}, skipping storage")
+                    continue
+
+                # JSON-serializable payload
                 signal_payload = json.loads(json.dumps(signal_data, default=str))
 
                 # Round created_at to nearest 15-minute mark
@@ -95,7 +97,7 @@ def process_all_coins():
                         timeframe=DEFAULT_TIMEFRAME,
                         payload=signal_payload,
                         created_at=created_at,
-                        processed=False  # initially False
+                        processed=False
                     )
                     session.add(signal)
                     session.commit()
@@ -127,6 +129,7 @@ def process_all_coins():
                 print(f"[{datetime.utcnow()}] Error processing {symbol}: {e}")
                 print(traceback.format_exc())
                 session.rollback()
+
 
 def run_signal_cycle():
     print(f"\n[{datetime.utcnow()}] === Starting signal cycle ===")
