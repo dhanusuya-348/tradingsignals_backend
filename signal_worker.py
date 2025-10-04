@@ -51,11 +51,11 @@ def process_all_coins():
     """Run the algo for all supported coins, insert signals into DB with processed=False."""
     # Define all coins your app supports
     all_coins = [
-        "BTC","ETH","XRP","USDT","BNB","SOL","USDC","DOGE","STETH","TRX","ADA",
-        "WBTC","LINK","HYPE","AVAX","XLM","SUI","BCH","HBAR","LTC","LEO","CRO",
-        "SHIB","TON","DOT","MNT","XMR","UNI","OKB","DAI","AAVE","PEPE","ENA","APT",
-        "BGB","NEAR","ICP","VET","FIL","MATIC","WSTETH","WBETH","USDE","WEETH","WETH",
-        "USDS","WBT","SUSDE","WLFI","ASTER"
+        "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "TRX", "AVAX", "LINK",
+        "DOT", "BCH", "LTC", "MATIC", "SHIB", "XLM", "UNI", "DAI", "ETC", "XMR",
+        "NEAR", "AAVE", "VET", "FIL", "ICP", "APT", "ALGO", "ATOM", "HBAR", "OP",
+        "ARB", "INJ", "SUI", "RENDER", "IMX", "MKR", "GRT", "THETA", "FTM", "SAND",
+        "AXS", "FLOW", "XTZ", "EOS", "MANA", "CAKE", "GALA", "ZIL", "ENJ", "CHZ"
     ]
 
 
