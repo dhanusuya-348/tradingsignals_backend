@@ -3,7 +3,7 @@ import os
 import boto3
 from botocore.exceptions import ClientError
 
-AWS_REGION = os.environ.get("AWS_DEFAULT_REGION")
+AWS_REGION = os.environ.get("AWS_REGION")
 SENDER = os.environ.get("SES_SENDER_EMAIL")
 
 ses_client = boto3.client("ses", region_name=AWS_REGION)
