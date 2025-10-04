@@ -50,14 +50,18 @@ def with_retries(func, max_retries=3, delay=5, *args, **kwargs):
 def process_all_coins():
     """Run the algo for all supported coins, insert signals into DB with processed=False."""
     # Define all coins your app supports
+    # all_coins = [
+    #     "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "TRX", "AVAX", "LINK",
+    #     "DOT", "BCH", "LTC", "MATIC", "SHIB", "XLM", "UNI", "DAI", "ETC", "XMR",
+    #     "NEAR", "AAVE", "VET", "FIL", "ICP", "APT", "ALGO", "ATOM", "HBAR", "OP",
+    #     "ARB", "INJ", "SUI", "RENDER", "IMX", "MKR", "GRT", "THETA", "FTM", "SAND",
+    #     "AXS", "FLOW", "XTZ", "EOS", "MANA", "CAKE", "GALA", "ZIL", "ENJ", "CHZ"
+    # ]
     all_coins = [
         "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "TRX", "AVAX", "LINK",
-        "DOT", "BCH", "LTC", "MATIC", "SHIB", "XLM", "UNI", "DAI", "ETC", "XMR",
-        "NEAR", "AAVE", "VET", "FIL", "ICP", "APT", "ALGO", "ATOM", "HBAR", "OP",
-        "ARB", "INJ", "SUI", "RENDER", "IMX", "MKR", "GRT", "THETA", "FTM", "SAND",
-        "AXS", "FLOW", "XTZ", "EOS", "MANA", "CAKE", "GALA", "ZIL", "ENJ", "CHZ"
+        "DOT", "BCH", "LTC", "MATIC", "SHIB", "XLM", "UNI", "ETC", "XMR",
+        "NEAR", "ICP"
     ]
-
 
     with get_session_context() as session:
         for symbol in all_coins:
