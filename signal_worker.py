@@ -47,89 +47,90 @@ def with_retries(func, max_retries=3, delay=5, *args, **kwargs):
                 raise
 
 # ---------------- Core Logic ----------------
-def process_watchlist():
-    """Run the algo for all symbols in watchlist and insert signals into DB."""
+def process_all_coins():
+    """Run the algo for all supported coins, insert signals into DB with processed=False."""
+    # Define all coins your app supports
+    all_coins = [
+        "BTC","ETH","XRP","USDT","BNB","SOL","USDC","DOGE","STETH","TRX","ADA",
+        "WBTC","LINK","HYPE","AVAX","XLM","SUI","BCH","HBAR","LTC","LEO","CRO",
+        "SHIB","TON","DOT","MNT","XMR","UNI","OKB","DAI","AAVE","PEPE","ENA","APT",
+        "BGB","NEAR","ICP","VET","FIL","MATIC","WSTETH","WBETH","USDE","WEETH","WETH",
+        "USDS","WBT","SUSDE","WLFI","ASTER"
+    ]
+
+
     with get_session_context() as session:
-        try:
-            rows = session.query(Watchlist.symbol).distinct().all()
-            symbols = [r.symbol for r in rows]
+        for symbol in all_coins:
+            try:
+                print(f"[{datetime.utcnow()}] Running algorithm for {symbol}...")
+                signal_data = with_retries(generate_live_signal_api, 2, 5, symbol)
 
-            print(f"[{datetime.utcnow()}] Found symbols in watchlist: {symbols}")
+                if not signal_data:
+                    print(f"[{datetime.utcnow()}] ⚠ No signal data for {symbol}, skipping...")
+                    continue
 
-            for symbol in symbols:
-                try:
-                    print(f"[{datetime.utcnow()}] Running algorithm for {symbol}...")
-                    signal_data = with_retries(generate_live_signal_api, 2, 5, symbol)
+                sig_type = signal_data.get("signal", "HOLD")
+                # You can still store HOLD signals if desired
+                if sig_type not in ["BUY", "SELL"]:
+                    print(f"[{datetime.utcnow()}] Signal is HOLD for {symbol}, storing as processed=False")
 
-                    if not signal_data:
-                        print(f"[{datetime.utcnow()}] ⚠ No signal data for {symbol}, skipping...")
-                        continue
+                # Ensure payload is JSON-serializable
+                signal_payload = json.loads(json.dumps(signal_data, default=str))
 
-                    sig_type = signal_data.get("signal", "HOLD")
-                    if sig_type not in ["BUY", "SELL"]:
-                        print(f"[{datetime.utcnow()}] Signal is HOLD for {symbol}, skipping DB insert...")
-                        continue  # skip HOLD signals
+                # Round created_at to nearest 15-minute mark
+                now = datetime.utcnow()
+                minute = (now.minute // 15) * 15
+                created_at = now.replace(minute=minute, second=0, microsecond=0)
 
-                    # Ensure payload is JSON-serializable
-                    signal_payload = json.loads(json.dumps(signal_data, default=str))
+                # Check if signal already exists
+                signal = session.query(Signal).filter_by(
+                    symbol=symbol,
+                    timeframe=DEFAULT_TIMEFRAME,
+                    created_at=created_at
+                ).first()
 
-                    # Round created_at to nearest 15-minute mark
-                    now = datetime.utcnow()
-                    minute = (now.minute // 15) * 15
-                    created_at = now.replace(minute=minute, second=0, microsecond=0)
-
-                    # --- Insert BUY/SELL signal ---
-                    signal = session.query(Signal).filter_by(
+                if not signal:
+                    signal = Signal(
                         symbol=symbol,
                         timeframe=DEFAULT_TIMEFRAME,
-                        created_at=created_at
-                    ).first()
-
-                    if not signal:
-                        signal = Signal(
-                            symbol=symbol,
-                            timeframe=DEFAULT_TIMEFRAME,
-                            payload=signal_payload,
-                            created_at=created_at
-                        )
-                        session.add(signal)
-                        session.commit()
-                        print(f"[{datetime.utcnow()}] New {sig_type} Signal created for {symbol} at {created_at}")
-                    else:
-                        print(f"[{datetime.utcnow()}] Reusing existing Signal for {symbol} at {created_at}")
-
-                    # Link users (no phone references)
-                    watchlist_users = session.query(Watchlist).filter_by(symbol=symbol).all()
-                    print(f"[{datetime.utcnow()}] Found {len(watchlist_users)} users watching {symbol}")
-
-                    for w in watchlist_users:
-                        exists = session.query(UserSignal).filter_by(
-                            user_sub=w.user_sub,
-                            signal_id=signal.id
-                        ).first()
-                        if not exists:
-                            us = UserSignal(
-                                user_sub=w.user_sub,
-                                email=w.email,
-                                signal_id=signal.id,
-                                delivery_status="pending"
-                            )
-                            session.add(us)
-
+                        payload=signal_payload,
+                        created_at=created_at,
+                        processed=False  # initially False
+                    )
+                    session.add(signal)
                     session.commit()
+                    print(f"[{datetime.utcnow()}] New {sig_type} Signal created for {symbol} at {created_at}")
+                else:
+                    print(f"[{datetime.utcnow()}] Reusing existing Signal for {symbol} at {created_at}")
 
-                except Exception as e:
-                    print(f"[{datetime.utcnow()}] Error processing {symbol}: {e}")
-                    print(traceback.format_exc())
-                    session.rollback()
+                # Link users who have this coin in watchlist
+                watchlist_users = session.query(Watchlist).filter_by(symbol=symbol).all()
+                print(f"[{datetime.utcnow()}] Found {len(watchlist_users)} users watching {symbol}")
 
-        except Exception as e:
-            print(f"[{datetime.utcnow()}] Error in process_watchlist: {e}")
-            print(traceback.format_exc())
+                for w in watchlist_users:
+                    exists = session.query(UserSignal).filter_by(
+                        user_sub=w.user_sub,
+                        signal_id=signal.id
+                    ).first()
+                    if not exists:
+                        us = UserSignal(
+                            user_sub=w.user_sub,
+                            email=w.email,
+                            signal_id=signal.id,
+                            delivery_status="pending"
+                        )
+                        session.add(us)
+
+                session.commit()
+
+            except Exception as e:
+                print(f"[{datetime.utcnow()}] Error processing {symbol}: {e}")
+                print(traceback.format_exc())
+                session.rollback()
 
 def run_signal_cycle():
     print(f"\n[{datetime.utcnow()}] === Starting signal cycle ===")
-    process_watchlist()
+    process_all_coins()
     print(f"[{datetime.utcnow()}] === Signal cycle completed ===\n")
 
 if __name__ == "__main__":
