@@ -1,4 +1,4 @@
-#models.py
+# models.py
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime,
     JSON, Boolean, ForeignKey, UniqueConstraint
@@ -19,7 +19,6 @@ class Watchlist(Base):
     user_sub = Column(String, index=True, nullable=False)   # Cognito user ID
     email = Column(String, index=True, nullable=False)      # store email for notifications
     symbol = Column(String, index=True, nullable=False)
-    #phone = Column(String, nullable=True)                   # optional phone for SMS
     created_at = Column(DateTime, nullable=False)
 
     def __repr__(self):
@@ -37,6 +36,7 @@ class Signal(Base):
     payload = Column(JSON, nullable=True)                  # JSON blob from algo
     created_at = Column(DateTime, nullable=False)
     pdf_url = Column(String, nullable=True)               # S3 URL if PDF generated
+    processed = Column(Boolean, default=False, nullable=False)  # <--- ADDED
 
     __table_args__ = (
         UniqueConstraint("symbol", "timeframe", "created_at", name="uq_signal_per_coin_tf_time"),
@@ -46,7 +46,7 @@ class Signal(Base):
     users = relationship("UserSignal", back_populates="signal", cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<Signal(symbol={self.symbol}, timeframe={self.timeframe}, created_at={self.created_at})>"
+        return f"<Signal(symbol={self.symbol}, timeframe={self.timeframe}, created_at={self.created_at}, processed={self.processed})>"
 
 class UserSignal(Base):
     """
