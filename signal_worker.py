@@ -1,4 +1,3 @@
-# signal_worker.py
 import sys
 import os
 import time
@@ -24,7 +23,7 @@ except ImportError:
 try:
     from models import get_session, Watchlist, Signal, UserSignal, get_session_context
     from algo.runner import generate_live_signal_api
-    from notifications import send_email
+    from notifications import send_email, format_signal_email  # <== NEW IMPORT
     print(f"[{datetime.utcnow()}] All imports successful")
 except Exception as e:
     print(f"[{datetime.utcnow()}] Import error: {e}")
@@ -50,7 +49,6 @@ def with_retries(func, max_retries=3, delay=5, *args, **kwargs):
 # ---------------- Core Logic ----------------
 def process_all_coins():
     """Run the algo for all supported coins, insert signals into DB, send notifications, mark processed."""
-    # Use subset of coins for now
     all_coins = [
         "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "TRX", "AVAX", "LINK",
         "DOT", "BCH", "LTC", "MATIC", "SHIB", "XLM", "UNI", "ETC", "XMR",
@@ -123,11 +121,17 @@ def process_all_coins():
                         session.add(us)
                         session.commit()
 
+                        # Build HTML email
+                        subject = f"New {sig_type} Signal for {symbol} ({signal_data.get('confidence', 0)}% Confidence)"
+                        body_html = format_signal_email(signal_data)
+                        body_text = f"Signal for {symbol}: {sig_type}\n\nConfidence: {signal_data.get('confidence', 0)}%\nSentiment: {signal_data.get('sentiment', 'N/A')}"
+
                         # Send email
                         success = send_email(
                             to_email=w.email,
-                            subject=f"New {sig_type} Signal for {symbol}",
-                            body_text=f"Signal for {symbol}: {sig_type}\n\nDetails: {signal_payload}"
+                            subject=subject,
+                            body_text=body_text,
+                            body_html=body_html
                         )
 
                         # Update delivery status
@@ -157,6 +161,7 @@ def run_signal_cycle():
 
 if __name__ == "__main__":
     run_signal_cycle()
+
 
 
 # # signal_worker.py
