@@ -93,6 +93,10 @@ def generate_live_signal_api(symbol: str):
 
         price_df = price_data[main_tf]  # use main_tf as the base timeframe
 
+        # Get current price from the latest candle
+        current_price = float(price_df['close'].iloc[-1])
+        print(f"Current price for {symbol}: ${current_price:.2f}")
+
         # Sentiment (single sentiment score used across TFs)
         sentiment_score, scored_headlines = run_with_timeout(
             get_sentiment_score, symbol, timeout=15, default=("neutral", [])
@@ -190,6 +194,7 @@ def generate_live_signal_api(symbol: str):
             "htf": htf,
             "signal": final_signal,
             "confidence": confidence,
+            "price": current_price,  # <<<< ADDED: Current entry price
             "sentiment": sentiment_score,
             "indicators": indicators_per_tf,   # nested indicators per timeframe
             "risk": risk_result,
@@ -272,7 +277,6 @@ def generate_pdf_report_full(symbol: str):
         import traceback
         print(f"Stack trace: {traceback.format_exc()}")
         return {"error": str(e)}
-
 
 
 # # algo/runner.py
