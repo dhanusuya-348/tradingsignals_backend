@@ -1,10 +1,20 @@
 #pdf_server.py
 from flask import Flask, send_file, jsonify
 from io import BytesIO
+from flask_cors import CORS
 from algo.runner import generate_pdf_report_full
 import os
 
 app = Flask(__name__)
+
+# Enable CORS for all routes
+CORS(app, resources={
+    r"/*": {
+        "origins": "*",  # In production, replace with your actual domain
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Accept"]
+    }
+})
 
 @app.route("/download-pdf/<symbol>")
 def download_pdf(symbol):
