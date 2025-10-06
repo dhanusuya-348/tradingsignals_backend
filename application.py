@@ -1,10 +1,13 @@
-#application.py
-from flask import Flask, request, jsonify
+# application.py
+from flask import Flask, request, jsonify, send_file
 from models import Base, get_engine_from_env, get_session_context, Watchlist, Signal, UserSignal, User
 from datetime import datetime
 from flask_cors import CORS
 from sqlalchemy import desc
 import traceback
+import os
+import threading
+from algo.runner import generate_pdf_report_full
 
 application = Flask(__name__)
 
@@ -19,9 +22,12 @@ CORS(
     allow_headers=["Content-Type", "Authorization", "X-Amz-Date", "X-Api-Key"]
 )
 
-# Create tables at startup (for dev only; in prod use migrations)
+# Create tables at startup
 engine = get_engine_from_env()
 Base.metadata.create_all(engine)
+
+# Store for tracking PDF generation status
+pdf_generation_status = {}
 
 # ======================
 # HEALTH CHECK
@@ -29,6 +35,137 @@ Base.metadata.create_all(engine)
 @application.route("/health")
 def health():
     return {"status": "ok"}
+
+# ======================
+# PDF GENERATION ROUTES
+# ======================
+@application.route("/api/generate-pdf/<symbol>", methods=["POST"])
+def generate_pdf(symbol):
+    """
+    Start PDF generation for a specific symbol.
+    Returns a job_id to track the generation status.
+    """
+    try:
+        symbol = symbol.upper()
+        job_id = f"{symbol}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        
+        # Initialize status
+        pdf_generation_status[job_id] = {
+            "status": "processing",
+            "symbol": symbol,
+            "started_at": datetime.utcnow().isoformat(),
+            "pdf_path": None,
+            "error": None
+        }
+        
+        # Start PDF generation in background thread
+        thread = threading.Thread(
+            target=generate_pdf_background,
+            args=(job_id, symbol)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            "ok": True,
+            "job_id": job_id,
+            "message": f"PDF generation started for {symbol}",
+            "estimated_time": "5-15 minutes"
+        }), 202
+        
+    except Exception as e:
+        print(f"Error starting PDF generation: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+def generate_pdf_background(job_id, symbol):
+    """Background task to generate PDF"""
+    try:
+        print(f"Starting PDF generation for {symbol} (job: {job_id})")
+        
+        # Call the PDF generation function
+        result = generate_pdf_report_full(symbol)
+        
+        if "error" in result:
+            pdf_generation_status[job_id] = {
+                "status": "failed",
+                "symbol": symbol,
+                "started_at": pdf_generation_status[job_id]["started_at"],
+                "completed_at": datetime.utcnow().isoformat(),
+                "pdf_path": None,
+                "error": result["error"]
+            }
+            print(f"PDF generation failed for {symbol}: {result['error']}")
+        else:
+            pdf_path = result.get("pdf_path")
+            pdf_generation_status[job_id] = {
+                "status": "completed",
+                "symbol": symbol,
+                "started_at": pdf_generation_status[job_id]["started_at"],
+                "completed_at": datetime.utcnow().isoformat(),
+                "pdf_path": pdf_path,
+                "error": None
+            }
+            print(f"PDF generation completed for {symbol}: {pdf_path}")
+            
+    except Exception as e:
+        pdf_generation_status[job_id] = {
+            "status": "failed",
+            "symbol": symbol,
+            "started_at": pdf_generation_status[job_id].get("started_at"),
+            "completed_at": datetime.utcnow().isoformat(),
+            "pdf_path": None,
+            "error": str(e)
+        }
+        print(f"Exception in PDF generation for {symbol}: {e}")
+        traceback.print_exc()
+
+@application.route("/api/pdf-status/<job_id>", methods=["GET"])
+def check_pdf_status(job_id):
+    """Check the status of a PDF generation job"""
+    try:
+        if job_id not in pdf_generation_status:
+            return jsonify({"error": "Job not found"}), 404
+        
+        status = pdf_generation_status[job_id]
+        return jsonify(status), 200
+        
+    except Exception as e:
+        print(f"Error checking PDF status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@application.route("/api/download-pdf/<job_id>", methods=["GET"])
+def download_pdf(job_id):
+    """Download the generated PDF"""
+    try:
+        if job_id not in pdf_generation_status:
+            return jsonify({"error": "Job not found"}), 404
+        
+        status = pdf_generation_status[job_id]
+        
+        if status["status"] != "completed":
+            return jsonify({
+                "error": "PDF not ready yet",
+                "status": status["status"]
+            }), 400
+        
+        pdf_path = status["pdf_path"]
+        
+        if not pdf_path or not os.path.exists(pdf_path):
+            return jsonify({"error": "PDF file not found"}), 404
+        
+        # Send file for download
+        return send_file(
+            pdf_path,
+            as_attachment=True,
+            download_name=os.path.basename(pdf_path),
+            mimetype='application/pdf'
+        )
+        
+    except Exception as e:
+        print(f"Error downloading PDF: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 # ======================
 # PROFILE ROUTES
@@ -176,14 +313,9 @@ def remove_from_watchlist(user_sub, symbol):
 # ======================
 @application.route("/api/user-signals/<user_sub>", methods=["GET"])
 def get_user_signals_dashboard(user_sub):
-    """
-    NEW ENDPOINT: Fetch all signals for coins in the user's watchlist.
-    Returns the last 20 signals ordered by created_at desc with full payload.
-    This is specifically for the dashboard page.
-    """
+    """Fetch all signals for coins in the user's watchlist."""
     try:
         with get_session_context() as session:
-            # Get user's watchlist symbols
             watchlist = session.query(Watchlist).filter_by(user_sub=user_sub).all()
             
             if not watchlist:
@@ -192,17 +324,14 @@ def get_user_signals_dashboard(user_sub):
                     "message": "No coins in watchlist"
                 }), 200
             
-            # Extract symbols from watchlist
             watched_symbols = [w.symbol for w in watchlist]
             
-            # Get signals for those symbols (last 20)
             signals = session.query(Signal).filter(
                 Signal.symbol.in_(watched_symbols)
             ).order_by(
                 Signal.created_at.desc()
             ).limit(20).all()
             
-            # Format response
             result = []
             for signal in signals:
                 payload = signal.payload or {}
@@ -211,6 +340,7 @@ def get_user_signals_dashboard(user_sub):
                     "symbol": signal.symbol,
                     "signal": payload.get("signal", "HOLD"),
                     "confidence": payload.get("confidence", 0),
+                    "price": payload.get("price"),  
                     "timing": payload.get("timing", {}),
                     "risk": payload.get("risk", {}),
                     "sentiment": payload.get("sentiment", "Neutral"),
@@ -402,8 +532,6 @@ if __name__ == "__main__":
 # def health():
 #     return {"status": "ok"}
 
-# # Removed /worker/run route – not needed anymore.
-
 # # ======================
 # # PROFILE ROUTES
 # # ======================
@@ -548,9 +676,65 @@ if __name__ == "__main__":
 # # ======================
 # # DASHBOARD/SIGNALS ROUTES
 # # ======================
+# @application.route("/api/user-signals/<user_sub>", methods=["GET"])
+# def get_user_signals_dashboard(user_sub):
+#     """
+#     NEW ENDPOINT: Fetch all signals for coins in the user's watchlist.
+#     Returns the last 20 signals ordered by created_at desc with full payload.
+#     This is specifically for the dashboard page.
+#     """
+#     try:
+#         with get_session_context() as session:
+#             # Get user's watchlist symbols
+#             watchlist = session.query(Watchlist).filter_by(user_sub=user_sub).all()
+            
+#             if not watchlist:
+#                 return jsonify({
+#                     "signals": [],
+#                     "message": "No coins in watchlist"
+#                 }), 200
+            
+#             # Extract symbols from watchlist
+#             watched_symbols = [w.symbol for w in watchlist]
+            
+#             # Get signals for those symbols (last 20)
+#             signals = session.query(Signal).filter(
+#                 Signal.symbol.in_(watched_symbols)
+#             ).order_by(
+#                 Signal.created_at.desc()
+#             ).limit(20).all()
+            
+#             # Format response
+#             result = []
+#             for signal in signals:
+#                 payload = signal.payload or {}
+#                 result.append({
+#                     "id": signal.id,
+#                     "symbol": signal.symbol,
+#                     "signal": payload.get("signal", "HOLD"),
+#                     "confidence": payload.get("confidence", 0),
+#                     "price": payload.get("price"),  
+#                     "timing": payload.get("timing", {}),
+#                     "risk": payload.get("risk", {}),
+#                     "sentiment": payload.get("sentiment", "Neutral"),
+#                     "strategies": payload.get("top_contributing_strategies", []),
+#                     "created_at": signal.created_at.isoformat() if signal.created_at else None
+#                 })
+            
+#             return jsonify({
+#                 "signals": result,
+#                 "count": len(result),
+#                 "watchlist_count": len(watched_symbols)
+#             }), 200
+            
+#     except Exception as e:
+#         print(f"Error fetching user signals: {e}")
+#         traceback.print_exc()
+#         return jsonify({"error": "Failed to fetch signals"}), 500
+
 # @application.route("/signals/<user_sub>", methods=["GET"])
 # def get_user_signals(user_sub):
-#     """Get live signals for user's watchlist"""
+#     """Get live signals for user's watchlist (legacy endpoint)"""
 #     try:
 #         with get_session_context() as session:
 #             watchlist = session.query(Watchlist).filter_by(user_sub=user_sub).all()
@@ -686,5 +870,5 @@ if __name__ == "__main__":
 #     except Exception as e:
 #         return {"error": str(e)}, 500
 
-# if __name__ == "_main_":
+# if __name__ == "__main__":
 #     application.run(host="0.0.0.0", port=5000)
