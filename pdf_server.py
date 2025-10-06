@@ -34,6 +34,10 @@ def download_pdf(symbol):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8001)  # run on EC2
+    app.run(
+        host="0.0.0.0",
+        port=8001,
+        ssl_context=("/home/ec2-user/certificate.crt", "/home/ec2-user/private.key")
+    )
+
