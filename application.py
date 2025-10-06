@@ -83,7 +83,11 @@ def generate_pdf_background(job_id, symbol):
     try:
         print(f"Starting PDF generation for {symbol} (job: {job_id})")
         
-        # Call the PDF generation function
+        # Determine the timeframe based on symbol
+        from algo.runner import get_timeframes_for_symbol
+        ltf, main_tf, htf = get_timeframes_for_symbol(symbol)
+        
+        # Call the PDF generation function with interval parameter
         result = generate_pdf_report_full(symbol)
         
         if "error" in result:
