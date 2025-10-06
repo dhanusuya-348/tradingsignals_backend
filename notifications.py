@@ -26,14 +26,24 @@ def format_signal_email(signal_data):
     decision = signal_data.get("decision", "N/A")
     timing = signal_data.get("timing", {})
     risk = signal_data.get("risk", {})
+    price = signal_data.get("price", "N/A")  # Get entry price
 
-    ltf = signal_data["ltf"]
-    interval = signal_data["interval"]
-    htf = signal_data["htf"]
-    ind = signal_data["indicators"]
+    ltf = signal_data.get("ltf", "N/A")
+    interval = signal_data.get("interval", "N/A")
+    htf = signal_data.get("htf", "N/A")
+    ind = signal_data.get("indicators", {})
 
     def safe_get(tf, key):
         return ind.get(tf, {}).get(key, "-")
+
+    def safe_format(value):
+        """Format numeric values safely"""
+        if value == "N/A" or value == "-" or value is None:
+            return "N/A"
+        try:
+            return f"${float(value):,.2f}"
+        except (ValueError, TypeError):
+            return str(value)
 
     # Pick colors
     color_map = {"BUY": "#2ecc71", "SELL": "#e74c3c", "HOLD": "#f1c40f"}
@@ -45,7 +55,11 @@ def format_signal_email(signal_data):
 
       <div style="max-width: 700px; margin:auto; background:white; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.1); padding:25px;">
         <h2 style="color:#333;">🚀 {symbol}/USDT — <span style='color:{signal_color};'>{signal}</span> Signal</h2>
-        <p style="font-size:15px; color:#555;">Confidence: <b>{confidence}%</b> | Sentiment: <b>{sentiment}</b></p>
+        <p style="font-size:15px; color:#555;">
+          <b>Entry Price:</b> {safe_format(price)} | 
+          <b>Confidence:</b> {confidence}% | 
+          <b>Sentiment:</b> {sentiment}
+        </p>
         <hr style="border:none; border-top:1px solid #eee; margin:15px 0;"/>
 
         <h3 style="color:#444;">📊 Indicator Summary</h3>
@@ -64,9 +78,9 @@ def format_signal_email(signal_data):
           </tr>
           <tr style="background:#fafafa;">
             <td style="padding:8px;">RSI</td>
-            <td style="padding:8px;">{safe_get(ltf, 'rsi_value'):.2f} ({safe_get(ltf, 'rsi_signal')})</td>
-            <td style="padding:8px;">{safe_get(interval, 'rsi_value'):.2f} ({safe_get(interval, 'rsi_signal')})</td>
-            <td style="padding:8px;">{safe_get(htf, 'rsi_value'):.2f} ({safe_get(htf, 'rsi_signal')})</td>
+            <td style="padding:8px;">{safe_get(ltf, 'rsi_value')} ({safe_get(ltf, 'rsi_signal')})</td>
+            <td style="padding:8px;">{safe_get(interval, 'rsi_value')} ({safe_get(interval, 'rsi_signal')})</td>
+            <td style="padding:8px;">{safe_get(htf, 'rsi_value')} ({safe_get(htf, 'rsi_signal')})</td>
           </tr>
           <tr>
             <td style="padding:8px;">Bollinger Bands</td>
@@ -84,16 +98,20 @@ def format_signal_email(signal_data):
 
         <h3 style="color:#444; margin-top:20px;">💰 Risk & Reward</h3>
         <ul style="line-height:1.6; color:#555;">
-          <li><b>Risk-Reward:</b> {risk.get('risk_reward_label', '-')}</li>
-          <li><b>Stop Loss:</b> {risk.get('suggested_stop_loss', '-')}</li>
-          <li><b>Take Profit:</b> {risk.get('suggested_take_profit', '-')}</li>
+          <li><b>Entry Price:</b> {safe_format(price)}</li>
+          <li><b>Stop Loss:</b> {safe_format(risk.get('suggested_stop_loss'))}</li>
+          <li><b>Take Profit:</b> {safe_format(risk.get('suggested_take_profit'))}</li>
+          <li><b>Risk-Reward Ratio:</b> {risk.get('risk_reward_label', '-')}</li>
           <li><b>Expected Profit:</b> {risk.get('expected_profit_percent', '-')}%</li>
           <li><b>Risk Level:</b> {risk.get('risk_level', '-')}</li>
         </ul>
 
         <h3 style="color:#444; margin-top:20px;">🕒 Timing</h3>
-        <p style="color:#555;">From <b>{timing.get('start', '-')}</b> to <b>{timing.get('end', '-')}</b>  
-        <br>Duration: <b>{timing.get('duration', '-')}</b></p>
+        <p style="color:#555;">
+          <b>Valid From:</b> {timing.get('start', '-')}<br>
+          <b>Valid To:</b> {timing.get('end', '-')}<br>
+          <b>Duration:</b> {timing.get('duration', '-')}
+        </p>
 
         <hr style="border:none; border-top:1px solid #eee; margin:20px 0;"/>
         <p style="font-size:13px; color:#777;">✅ Decision: <b>{decision}</b></p>
@@ -141,6 +159,7 @@ if __name__ == "__main__":
         "htf": "4h",
         "signal": "BUY",
         "confidence": 69,
+        "price": 4544.50,  # Added entry price
         "sentiment": "neutral",
         "indicators": {
             "30m": {"macd": "bullish", "rsi_value": 73.6, "rsi_signal": "neutral", "bb": "within_range", "volatility": "medium"},
@@ -160,7 +179,6 @@ if __name__ == "__main__":
 
     html = format_signal_email(test_signal)
     send_email("dhanurk25@gmail.com", "🚀 ETH Signal Alert - BUY", body_html=html)
-
 
 # # notifications.py
 # import os
