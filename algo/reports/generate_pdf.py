@@ -495,7 +495,7 @@ class PDFReport(FPDF):
             "Entry Time":23,
             "timestamp": 22,
             "Timestamp": 25,
-            "coin": 14,  # Slightly wider for icon + text
+            "coin": 14,
             "open ($)": 15,
             "Entry.P ($)":16,
             "close ($)": 15,
@@ -526,9 +526,9 @@ class PDFReport(FPDF):
             "Historical Time": 25,
             "Historical Close ($)": 28,
             "Historical Volume (coins)": 37,
-            "Current Close ($)": 20,           # Increased for formatted numbers
-            "Current Volume (coins)": 26,      # Increased for large volume numbers
-            "1M Ago Time": 28,                 # Increased for full timestamp
+            "Current Close ($)": 20,
+            "Current Volume (coins)": 26,
+            "1M Ago Time": 28,
             "1M Ago C ($)": 20,
             "1M Ago V (coins)": 24,
             "2M Ago Time": 28,
@@ -537,36 +537,35 @@ class PDFReport(FPDF):
             "3M Ago Time": 28,
             "3M Ago C ($)": 20,
             "3M Ago V (coins)": 24,
-            "4M Ago Time": 30,
-            "4M Ago Close ($)": 25,
-            "4M Ago Volume (coins)": 33,
-            "5M Ago Time": 30,
-            "5M Ago Close ($)": 25,
-            "5M Ago Volume (coins)": 33,
-            "6M Ago Time": 30,
-            "6M Ago Close ($)": 25,
-            "6M Ago Volume (coins)": 33,
-            "7M Ago Time": 30,
-            "7M Ago Close ($)": 25,
-            "7M Ago Volume (coins)": 33,
-            "8M Ago Time": 30,
-            "8M Ago Close ($)": 25,
-            "8M Ago Volume (coins)": 33,
-            "9M Ago Time": 30,
-            "9M Ago Close ($)": 25,
-            "9M Ago Volume (coins)": 33,
-            "10M Ago Time": 30,
-            "10M Ago Close ($)": 25,
-            "10M Ago Volume (coins)": 33,
-            "11M Ago Time": 30,
-            "11M Ago Close ($)": 25,
-            "11M Ago Volume (coins)": 36,
-            "12M Ago Time": 30,
-            "12M Ago Close ($)": 25,
-            "12M Ago Volume (coins)": 33,
+            "4M Ago Time": 28,
+            "4M Ago C ($)": 20,           # ← Changed from "4M Ago Close ($)"
+            "4M Ago V (coins)": 24,       # ← Changed from "4M Ago Volume (coins)"
+            "5M Ago Time": 28,
+            "5M Ago C ($)": 20,           # ← Changed from "5M Ago Close ($)"
+            "5M Ago V (coins)": 24,       # ← Changed from "5M Ago Volume (coins)"
+            "6M Ago Time": 28,
+            "6M Ago C ($)": 20,           # ← Changed
+            "6M Ago V (coins)": 24,       # ← Changed
+            "7M Ago Time": 28,
+            "7M Ago C ($)": 20,           # ← Changed
+            "7M Ago V (coins)": 24,       # ← Changed
+            "8M Ago Time": 28,
+            "8M Ago C ($)": 20,           # ← Changed
+            "8M Ago V (coins)": 24,       # ← Changed
+            "9M Ago Time": 28,
+            "9M Ago C ($)": 20,           # ← Changed
+            "9M Ago V (coins)": 24,       # ← Changed
+            "10M Ago Time": 28,
+            "10M Ago C ($)": 20,          # ← Changed
+            "10M Ago V (coins)": 24,      # ← Changed
+            "11M Ago Time": 28,
+            "11M Ago C ($)": 20,          # ← Changed
+            "11M Ago V (coins)": 24,      # ← Changed
+            "12M Ago Time": 28,
+            "12M Ago C ($)": 20,          # ← Changed
+            "12M Ago V (coins)": 24,      # ← Changed
         }
         
-
         # Table header
         for col in columns:
             self.cell(col_widths.get(col, 16), 7, str(col), border=1, align='C', fill=True)
@@ -1042,20 +1041,31 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
     pdf.set_font("Arial", "B", 10)
     
     # Different contextual summaries based on signal type
+    def safe_float(val, default=0.0):
+        """Convert val to float if possible, otherwise return default."""
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+
     if signal in ["BUY", "SELL"]:
         pdf.multi_cell(0, 5, (
-            f"\nThe system identified ${entry_price:,.2f} as the best entry point, with downside risk managed at ${stop_loss:,.2f} "
-            f"and target reward at ${take_profit:,.2f}. Based on these, a {profit_percent} % gain was expected. "
+            f"\nThe system identified ${safe_float(entry_price):,.2f} as the best entry point, "
+            f"with downside risk managed at ${safe_float(stop_loss):,.2f} "
+            f"and target reward at ${safe_float(take_profit):,.2f}. "
+            f"Based on these, a {profit_percent} % gain was expected. "
             f"Risk-Reward stood at {rrr}, and the signal is considered valid for {duration}. "
             "This setup reflects a strong probability for price action favoring the trade direction."
         ))
     else:  # HOLD signal
         pdf.multi_cell(0, 5, (
             f"\nThe system determined that current market conditions do not favor taking a position at this time. "
-            f"With the current price around ${entry_price:,.2f}, the analysis suggests waiting for clearer directional signals. "
+            f"With the current price around ${safe_float(entry_price):,.2f}, "
+            f"the analysis suggests waiting for clearer directional signals. "
             f"This recommendation remains valid for {duration}, during which continued monitoring is advised. "
             "The system will reassess conditions and may provide actionable signals when market dynamics improve."
         ))
+
 
     # --- Generate Professional Trading Chart ---
     try:
@@ -1381,8 +1391,8 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
 
         # Format the values after storing colors
         for col in ["Open", "High", "Low", "Close"]:
-            price_snapshot[col] = price_snapshot[col].apply(lambda x: "{:,.2f}".format(x))
-        price_snapshot["Volume"] = price_snapshot["Volume"].round(2)
+            price_snapshot[col] = price_snapshot[col].apply(lambda x: "{:,.2f}".format(float(x)) if pd.notna(x) else "N/A")
+        price_snapshot["Volume"] = price_snapshot["Volume"].apply(lambda x: "{:,.2f}".format(float(x)) if pd.notna(x) else "N/A")
 
         # Extract base asset from symbol (e.g., BTC from BTCUSDT)
         #base_asset = ''.join([c for c in symbol if not c.isdigit()]).replace("USDT", "")
@@ -3350,9 +3360,9 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
         ["Take Profit", f"$ {tp:,.2f}" if tp > 0 else "$ 0.00", "PROFIT"],
         ["Max Loss per Share", f"$ {max_loss_per_share:,.2f}" if max_loss_per_share > 0 else "$ 0.00", "LOSS"],
         ["Max Gain per Share", f"$ {max_gain_per_share:,.2f}" if max_gain_per_share > 0 else "$ 0.00", "PROFIT"],
-        ["Risk-Reward Ratio", f"{risk_info['rr_ratio']}", "RRR"],
-        ["Risk Level", f"{risk_info['risk_level']}", "RISK"],
-        ["Expected Profit %", f"{risk_info['expected_profit_percent']}", "PROFIT"]
+        ["Risk-Reward Ratio", f"{risk_info.get('rr_ratio', 'N/A')}", "RRR"],
+        ["Risk Level", f"{risk_info.get('risk_level', 'N/A')}", "RISK"],
+        ["Expected Profit %", f"{risk_info.get('expected_profit_percent', 'N/A')}", "PROFIT"]
     ]
 
     # Table styling
@@ -3578,6 +3588,19 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
     else:
         analysis_period = '2500 candles'
     
+    from datetime import datetime, timezone
+
+    def safe_format_datetime(dt):
+        """Return formatted datetime string. Accepts datetime or ISO string."""
+        if isinstance(dt, str):
+            try:
+                dt = datetime.fromisoformat(dt)
+            except Exception:
+                return 'N/A'
+        if isinstance(dt, datetime):
+            return dt.strftime('%d-%b-%Y %H:%M')
+        return 'N/A'
+
     pdf.multi_cell(0, 5, f"- Timeframe: {timeframe_str}")
     pdf.multi_cell(0, 5, f"- Historical Data Limit: {analysis_period}")
     pdf.multi_cell(0, 5, f"- Data Points Analyzed: {data_points} candles")
@@ -3585,11 +3608,12 @@ def create_pdf_report(symbol, interval, signal_info, risk_info, timing_info, sum
 
     pdf.ln(3)
 
-    start = timing_info['start']
-    end = timing_info['end']
-    duration = timing_info['duration']
-    formatted_start = start.strftime('%d-%b-%Y %H:%M') if start else 'N/A'
-    formatted_end = end.strftime('%d-%b-%Y %H:%M') if end else 'N/A'
+    start = timing_info.get('start')
+    end = timing_info.get('end')
+    duration = timing_info.get('duration', 'N/A')
+
+    formatted_start = safe_format_datetime(start)
+    formatted_end = safe_format_datetime(end)
 
     # Get signal type
     signal_direction = signal_info.get('signal', 'HOLD').upper()
@@ -3988,17 +4012,18 @@ def format_backtest_table(df, max_rows):
     
     # Format price columns
     for col in ["open", "exit_price", "take_profit", "stop_loss"]:
-        df[col] = df[col].apply(lambda x: "{:,.2f}".format(x))
+        df[col] = df[col].apply(lambda x: "{:,.2f}".format(float(x)) if pd.notna(x) and str(x) != 'N/A' else x)
     
     # Format other columns
-    df["rsi"] = df["rsi"].round(1)
+    df["rsi"] = df["rsi"].apply(lambda x: round(float(x), 1) if pd.notna(x) else "N/A")
     df["estimated_duration_minutes"] = df["estimated_duration_minutes"].apply(
         lambda x: f"{int(x)}mins" if pd.notna(x) else "-"
     )
     df["actual_duration_minutes"] = df["actual_duration_minutes"].apply(
         lambda x: f"{int(x)}mins" if pd.notna(x) else "-"
     )
-    df["net_return_percent"] = df["net_return_percent"].round(2)
+    
+    df["net_return_percent"] = df["net_return_percent"].apply(lambda x: round(float(x), 2) if pd.notna(x) and str(x) != 'N/A' else 0.0)
 
     # Rename columns for display
     df.rename(columns={

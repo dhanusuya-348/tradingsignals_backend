@@ -4,11 +4,13 @@ import os
 import sys
 import pandas as pd
 import concurrent.futures
+from typing import Dict, Any
+from aws_helpers import upload_pdf_to_s3
 
 # Add project root to Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Use relative imports since we're inside the algo folder
+# Relative imports
 from database.db_manager import get_signal_by_id
 from .data.fetch_price import get_price_data
 from .data.fetch_sentiment import get_sentiment_score
@@ -22,7 +24,6 @@ from .logic.risk_manager import calculate_risk_management
 from .logic.signal_timer import estimate_signal_duration
 from .backtesting.backtester import run_backtest
 from .backtesting.evaluator import evaluate_backtest_results
-from .data.fetch_news_utils import fetch_rss_headlines
 from .reports.visualization import plot_backtest_results, plot_price_with_indicators
 from .reports.generate_pdf import create_pdf_report
 
@@ -30,119 +31,73 @@ from .reports.generate_pdf import create_pdf_report
 os.makedirs("reports/plots", exist_ok=True)
 os.makedirs("reports/generated_pdfs", exist_ok=True)
 
-
 # -------------------- Timeout Helper --------------------
-def run_with_timeout(func, *args, timeout=20, default=None, **kwargs):
-    """Runs a function with a timeout. If it exceeds, returns default."""
+def run_with_timeout(func, *args, timeout: int = None, default=None, **kwargs):
     try:
+        if timeout is None:
+            return func(*args, **kwargs)
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(func, *args, **kwargs)
             return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
-        print(f"Timeout in {func.__name__}, returning default")
+        print(f"[TIMEOUT] {func.__name__} exceeded {timeout}s, returning default")
         return default
     except Exception as e:
-        print(f"Error in {func.__name__}: {e}")
+        print(f"[ERROR] {func.__name__}: {e}")
         return default
-
 
 # -------------------- Timeframe selection --------------------
 def get_timeframes_for_symbol(symbol: str):
-    """
-    Return (ltf, main_tf, htf) depending on symbol.
-    - BTC/ETH use larger main timeframe (30m) for better stability:
-        -> (30m, 1h, 4h)  OR (30m main? see below)
-      The user wanted BTC/ETH to be (30m, 1h, 4h) — we interpret main_tf as the middle timeframe.
-    - Others use (15m, 1h, 4h) where main_tf = 15m.
-    NOTE: We return (ltf, main_tf, htf) where main_tf is the timeframe used as base.
-    """
     s = (symbol or "").upper()
-    # Accept common suffixes like BTC, BTCUSDT, ETH, ETHUSDT
     if s.startswith("BTC") or s.startswith("ETH"):
-        # For BTC/ETH: choose main 1h with LTF 30m and HTF 4h (better for volatile coins)
         return "30m", "1h", "4h"
-    else:
-        # Default: quick intraday signals
-        return "5m", "15m", "1h"
-
+    return "5m", "15m", "1h"
 
 # -------------------- Live Signal --------------------
-def generate_live_signal_api(symbol: str):
-    """
-    Full live signal generator using multi-timeframe selection based on symbol.
-    Returns JSON-style dict with all signal + risk info.
-
-    Timeframes chosen by get_timeframes_for_symbol():
-        returns ltf, main_tf, htf
-    """
+def generate_live_signal_api(symbol: str) -> Dict[str, Any]:
     try:
-        print(f"Generating signal for {symbol}")
-
-        # determine timeframes
+        print(f"[INFO] Generating signal for {symbol}")
         ltf, main_tf, htf = get_timeframes_for_symbol(symbol)
         timeframes = [ltf, main_tf, htf]
-        print(f"Using timeframes LTF={ltf}, MTF={main_tf}, HTF={htf}")
+        print(f"[INFO] Using timeframes LTF={ltf}, MTF={main_tf}, HTF={htf}")
 
-        # Fetch price data for all timeframes
+        # Fetch price data
         price_data = {}
         for tf in timeframes:
-            df = run_with_timeout(get_price_data, symbol, tf, timeout=30, default=None)
+            df = run_with_timeout(get_price_data, symbol, tf, timeout=60, default=None)
             if df is None or df.empty:
                 raise RuntimeError(f"Failed to fetch price data for {tf}")
             price_data[tf] = df
-            print(f"Fetched {len(df)} data points for {tf}")
+            print(f"[INFO] Fetched {len(df)} candles for {tf}")
 
-        price_df = price_data[main_tf]  # use main_tf as the base timeframe
-
-        # Get current price from the latest candle
+        price_df = price_data[main_tf]
         current_price = float(price_df['close'].iloc[-1])
-        print(f"Current price for {symbol}: ${current_price:.2f}")
 
-        # Sentiment (single sentiment score used across TFs)
+        # Sentiment
         sentiment_score, scored_headlines = run_with_timeout(
-            get_sentiment_score, symbol, timeout=15, default=("neutral", [])
+            get_sentiment_score, symbol, timeout=30, default=("neutral", [])
         )
         sentiment_float = 1.0 if sentiment_score == "bullish" else -1.0 if sentiment_score == "bearish" else 0.0
-        print(f"Sentiment: {sentiment_score}")
 
-        # ---------------- Indicators per timeframe ----------------
+        # Indicators
         indicators_per_tf = {}
         for tf, df in price_data.items():
-            try:
-                macd_signal = run_with_timeout(calculate_macd, df, timeout=10, default="neutral")
-                rsi_val, rsi_signal = run_with_timeout(calculate_rsi, df, timeout=10, default=(50, "neutral"))
-                bb_signal = run_with_timeout(calculate_bollinger_bands, df, timeout=10, default="neutral")
-                vol = run_with_timeout(calculate_volatility, df, timeout=10, default=0.0)
-                vol_metrics = run_with_timeout(calculate_volume_metrics, df, timeout=10, default={})
+            indicators_per_tf[tf] = {
+                "macd": run_with_timeout(calculate_macd, df, timeout=20, default="neutral"),
+                "rsi_value": run_with_timeout(calculate_rsi, df, timeout=20, default=(50, "neutral"))[0],
+                "rsi_signal": run_with_timeout(calculate_rsi, df, timeout=20, default=(50, "neutral"))[1],
+                "bb": run_with_timeout(calculate_bollinger_bands, df, timeout=20, default="neutral"),
+                "volatility": run_with_timeout(calculate_volatility, df, timeout=20, default=0.0),
+                "volume_metrics": run_with_timeout(calculate_volume_metrics, df, timeout=20, default={})
+            }
 
-                indicators_per_tf[tf] = {
-                    "macd": macd_signal,
-                    "rsi_value": rsi_val,
-                    "rsi_signal": rsi_signal,
-                    "bb": bb_signal,
-                    "volatility": vol,
-                    "volume_metrics": vol_metrics,
-                }
-            except Exception as e:
-                print(f"Indicator calculation failed for {tf}: {e}")
-                indicators_per_tf[tf] = {
-                    "macd": "neutral",
-                    "rsi_value": 50,
-                    "rsi_signal": "neutral",
-                    "bb": "neutral",
-                    "volatility": 0.0,
-                    "volume_metrics": {}
-                }
-
-        # Core signal engine (multi-timeframe input)
+        # Core signal engine
         final_signal, confidence, strategies = run_with_timeout(
             core_generate_live_signal, price_data, sentiment_score, symbol,
-            timeout=30, default=("HOLD", 0, {})
+            timeout=60, default=("HOLD", 0, {})
         )
-        print(f"Core signal: {final_signal} (confidence: {confidence}%)")
 
-        # Risk management - run against main_tf price_df (the base)
-        # pass main_tf indicators where useful (we pick main_tf indicator values)
+        # Risk management
         main_indicators = indicators_per_tf.get(main_tf, {})
         indicators_for_risk = {
             "rsi": main_indicators.get("rsi_value", 50),
@@ -150,20 +105,19 @@ def generate_live_signal_api(symbol: str):
             "bb": main_indicators.get("bb", "neutral"),
             "volatility": main_indicators.get("volatility", 0.0),
             "sentiment": sentiment_float,
-            "trend_strength": 0.6,
+            "trend_strength": 0.6
         }
         risk_result = run_with_timeout(
             calculate_risk_management, price_df, final_signal, indicators_for_risk["volatility"], indicators_for_risk, confidence,
-            timeout=15, default={"risk_level": "invalid"}
+            timeout=30, default={"risk_level": "invalid"}
         )
 
         # Decision
         final_decision = "REJECTED"
         if final_signal in ["BUY", "SELL"] and risk_result.get('risk_level') not in ['too_weak', 'invalid']:
             final_decision = "APPROVED"
-        print(f"Final decision: {final_decision}")
 
-        # Signal duration (use main_tf)
+        # Signal duration
         if final_decision == "APPROVED":
             duration_minutes = run_with_timeout(
                 estimate_signal_duration,
@@ -173,21 +127,16 @@ def generate_live_signal_api(symbol: str):
                 sentiment="bullish" if sentiment_float > 0.3 else "bearish" if sentiment_float < -0.3 else "neutral",
                 volatility=main_indicators.get("volatility", 0.0),
                 timeframe=main_tf,
-                timeout=10,
+                timeout=20,
                 default=30
             )
-            # derive start from the latest index of the main timeframe df
-            try:
-                start = price_df.index[-1]
-            except Exception:
-                start = datetime.datetime.utcnow()
+            start = price_df.index[-1] if not price_df.empty else datetime.datetime.utcnow()
             end = start + datetime.timedelta(minutes=duration_minutes)
             timing_info = {"start": start, "end": end, "duration": f"~{duration_minutes} minutes"}
         else:
             now = datetime.datetime.utcnow()
             timing_info = {"start": now, "end": now + datetime.timedelta(minutes=30), "duration": "No Duration Calculated"}
 
-        # Final result
         result = {
             "symbol": symbol,
             "interval": main_tf,
@@ -195,9 +144,9 @@ def generate_live_signal_api(symbol: str):
             "htf": htf,
             "signal": final_signal,
             "confidence": confidence,
-            "price": current_price,  # <<<< ADDED: Current entry price
+            "price": current_price,
             "sentiment": sentiment_score,
-            "indicators": indicators_per_tf,   # nested indicators per timeframe
+            "indicators": indicators_per_tf,
             "risk": risk_result,
             "strategies": strategies,
             "decision": final_decision,
@@ -206,13 +155,13 @@ def generate_live_signal_api(symbol: str):
             "timestamp": datetime.datetime.utcnow().isoformat(),
         }
 
-        print(f"Signal generated successfully: {result['signal']}")
+        print(f"[SUCCESS] Signal generated: {result['signal']}")
         return result
 
     except Exception as e:
-        print(f"Error in generate_live_signal_api: {e}")
+        print(f"[ERROR] generate_live_signal_api: {e}")
         import traceback
-        print(f"Stack trace: {traceback.format_exc()}")
+        print(traceback.format_exc())
         return {
             "symbol": symbol,
             "interval": None,
@@ -222,42 +171,31 @@ def generate_live_signal_api(symbol: str):
             "timestamp": datetime.datetime.utcnow().isoformat(),
         }
 
-
-# -------------------- Full PDF Pipeline --------------------
-def generate_pdf_report_full(symbol: str):
-    """
-    Full pipeline (signal + backtest + plots + PDF) using the symbol's main timeframe.
-    """
+# -------------------- PDF + Backtest Pipeline --------------------
+def generate_pdf_report_full(symbol: str) -> Dict[str, Any]:
+    presigned_url = None
     try:
-        # Step 1: Live signal
         result = generate_live_signal_api(symbol)
         main_tf = result.get("interval") or "15m"
 
-        # Step 2: Backtest (base on main_tf)
-        price_df = run_with_timeout(get_price_data, symbol, main_tf, timeout=30, default=pd.DataFrame())
-        try:
-            backtest_df = run_with_timeout(
-                run_backtest, price_df, symbol, main_tf, result.get("scored_headlines", []), {main_tf: price_df},
-                timeout=60, default=pd.DataFrame()
-            )
-            summary = run_with_timeout(
-                evaluate_backtest_results, backtest_df, timeout=15, default={}
-            ) if not backtest_df.empty else {}
-        except Exception as e:
-            backtest_df = pd.DataFrame()
-            summary = {}
-            print(f"Backtest failed: {e}")
+        price_df = run_with_timeout(get_price_data, symbol, main_tf, timeout=60, default=pd.DataFrame())
+        if price_df.empty:
+            return {"error": "Price data empty"}
 
-        # Step 3: Charts
-        run_with_timeout(plot_backtest_results, backtest_df, "reports/plots/backtest_chart.png", timeout=20, default=None)
-        run_with_timeout(plot_price_with_indicators, price_df, backtest_df, symbol, "reports/plots/price_chart.png", timeout=20, default=None)
+        backtest_df = run_with_timeout(
+            run_backtest, price_df, symbol, main_tf, result.get("scored_headlines", []), {main_tf: price_df},
+            timeout=300, default=pd.DataFrame()
+        )
+        summary = run_with_timeout(
+            evaluate_backtest_results, backtest_df, timeout=60, default={}
+        ) if not backtest_df.empty else {}
 
-        # Step 4: PDF
+        plot_backtest_results(backtest_df, "reports/plots/backtest_chart.png")
+        plot_price_with_indicators(price_df, backtest_df, symbol, "reports/plots/price_chart.png")
+
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         pdf_path = f"reports/generated_pdfs/{symbol}_{main_tf}_{result.get('signal','HOLD')}_{timestamp}_TradingSignals.pdf"
-
-        run_with_timeout(
-            create_pdf_report,
+        create_pdf_report(
             symbol,
             main_tf,
             signal_info=result,
@@ -266,46 +204,40 @@ def generate_pdf_report_full(symbol: str):
             summary=summary,
             pdf_path=pdf_path,
             backtest_df=backtest_df,
-            scored_headlines=result.get("scored_headlines", []),
-            timeout=60,
-            default=None
+            headlines=result.get("scored_headlines", [])
         )
 
-        return {"pdf_path": pdf_path, "summary": summary, "signal": result}
+        try:
+            presigned_url = upload_pdf_to_s3(pdf_path)
+            print(f"[INFO] PDF uploaded to S3: {presigned_url}")
+        except Exception as e:
+            print(f"[WARN] Failed to upload PDF to S3: {e}")
+
+        return {"pdf_path": pdf_path, "summary": summary, "signal": result, "s3_url": presigned_url}
 
     except Exception as e:
-        print(f"Error in generate_pdf_report_full: {e}")
+        print(f"[ERROR] generate_pdf_report_full: {e}")
         import traceback
-        print(f"Stack trace: {traceback.format_exc()}")
+        print(traceback.format_exc())
         return {"error": str(e)}
 
-def generate_pdf_for_signal(signal_id):
-    """
-    Generate PDF report for a specific signal by signal_id.
-    This fetches the signal from the database and creates a PDF for it.
-    
-    Args:
-        signal_id (str): The unique ID of the signal
-        
-    Returns:
-        dict: Contains pdf_path and signal data, or error message
-    """
+# -------------------- PDF for Existing Signal --------------------
+def generate_pdf_for_signal(signal_id: str) -> Dict[str, Any]:
+    presigned_url = None
     try:
-        print(f"📄 Starting PDF generation for signal_id: {signal_id}")
-        
-        # Step 1: Fetch signal from database
+        print(f"[INFO] Starting PDF generation for signal_id: {signal_id}")
         signal_data = get_signal_by_id(signal_id)
-        
         if not signal_data:
-            return {"error": f"Signal with ID {signal_id} not found in database"}
-        
-        print(f"✅ Signal found: {signal_data.get('symbol')} - {signal_data.get('signal')}")
-        
-        # Step 2: Extract signal information
+            return {"error": f"Signal with ID {signal_id} not found"}
+
         symbol = signal_data.get('symbol')
         interval = signal_data.get('interval', '15m')
-        
-        # Reconstruct signal_info structure (matching your existing format)
+        signal_time_str = signal_data.get('created_at') or datetime.datetime.utcnow().isoformat()
+        try:
+            signal_time = datetime.datetime.fromisoformat(signal_time_str.replace('Z', '+00:00'))
+        except Exception:
+            signal_time = datetime.datetime.utcnow()
+
         signal_info = {
             "symbol": symbol,
             "interval": interval,
@@ -316,67 +248,33 @@ def generate_pdf_for_signal(signal_id):
             "indicators": signal_data.get('indicators', {}),
             "strategies": signal_data.get('strategies', {}),
             "decision": signal_data.get('decision', 'REJECTED'),
-            "timestamp": signal_data.get('created_at', datetime.datetime.utcnow().isoformat()),
+            "timestamp": signal_time.isoformat(),
             "scored_headlines": signal_data.get('scored_headlines', [])
         }
-        
-        # Risk info
         risk_info = signal_data.get('risk', {})
-        
-        # Timing info
         timing_info = signal_data.get('timing', {})
-        
-        # Convert string timestamps to datetime objects if needed
-        if isinstance(timing_info.get('start'), str):
-            timing_info['start'] = datetime.datetime.fromisoformat(timing_info['start'].replace('Z', '+00:00'))
-        if isinstance(timing_info.get('end'), str):
-            timing_info['end'] = datetime.datetime.fromisoformat(timing_info['end'].replace('Z', '+00:00'))
-        
-        # Step 3: Fetch fresh price data for backtest
-        print(f"📊 Fetching price data for {symbol} ({interval})")
-        price_df = run_with_timeout(get_price_data, symbol, interval, timeout=30, default=pd.DataFrame())
-        
-        # Step 4: Run backtest
-        try:
-            print(f"⚙️ Running backtest for {symbol}")
-            backtest_df = run_with_timeout(
-                run_backtest, 
-                price_df, 
-                symbol, 
-                interval, 
-                signal_info.get("scored_headlines", []), 
-                {interval: price_df},
-                timeout=60, 
-                default=pd.DataFrame()
-            )
-            
-            summary = run_with_timeout(
-                evaluate_backtest_results, backtest_df, timeout=15, default={}
-            ) if not backtest_df.empty else {}
-            
-            print(f"✅ Backtest completed: {len(backtest_df)} trades")
-            
-        except Exception as e:
-            print(f"⚠️ Backtest failed: {e}")
-            backtest_df = pd.DataFrame()
-            summary = {}
-        
-        # Step 5: Generate charts
-        print(f"📈 Generating charts")
-        run_with_timeout(plot_backtest_results, backtest_df, "reports/plots/backtest_chart.png", timeout=20, default=None)
-        run_with_timeout(plot_price_with_indicators, price_df, backtest_df, symbol, "reports/plots/price_chart.png", timeout=20, default=None)
-        
-        # Add price snapshot to signal_info for PDF generation
+
+        price_df = run_with_timeout(get_price_data, symbol, interval, timeout=60, default=pd.DataFrame())
+        if not price_df.empty:
+            price_df = price_df[price_df.index <= signal_time]
+
+        backtest_df = run_with_timeout(
+            run_backtest, price_df, symbol, interval,
+            signal_info.get("scored_headlines", []), {interval: price_df},
+            timeout=300, default=pd.DataFrame()
+        )
+        summary = run_with_timeout(
+            evaluate_backtest_results, backtest_df, timeout=60, default={}
+        ) if not backtest_df.empty else {}
+
+        plot_backtest_results(backtest_df, "reports/plots/backtest_chart.png")
+        plot_price_with_indicators(price_df, backtest_df, symbol, "reports/plots/price_chart.png")
         signal_info['price_snapshot'] = price_df
-        
-        # Step 6: Generate PDF
-        print(f"📝 Creating PDF document")
+
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        pdf_filename = f"Signal_{signal_id}_{symbol}_{interval}_{signal_info.get('signal', 'HOLD')}_{timestamp}.pdf"
+        pdf_filename = f"Signal_{signal_id}_{symbol}_{interval}_{signal_info.get('signal','HOLD')}_{timestamp}.pdf"
         pdf_path = f"reports/generated_pdfs/{pdf_filename}"
-        
-        run_with_timeout(
-            create_pdf_report,
+        create_pdf_report(
             symbol,
             interval,
             signal_info=signal_info,
@@ -385,25 +283,24 @@ def generate_pdf_for_signal(signal_id):
             summary=summary,
             pdf_path=pdf_path,
             backtest_df=backtest_df,
-            scored_headlines=signal_info.get("scored_headlines", []),
-            timeout=60,
-            default=None
+            headlines=signal_info.get("scored_headlines", [])
         )
-        
-        print(f"✅ PDF generated successfully: {pdf_path}")
-        
-        return {
-            "pdf_path": pdf_path, 
-            "summary": summary, 
-            "signal": signal_info,
-            "signal_id": signal_id
-        }
-        
+
+        try:
+            presigned_url = upload_pdf_to_s3(pdf_path)
+            print(f"[INFO] PDF uploaded to S3: {presigned_url}")
+        except Exception as e:
+            print(f"[WARN] Failed to upload PDF to S3: {e}")
+
+        print(f"[SUCCESS] PDF saved at {os.path.abspath(pdf_path)}")
+        return {"pdf_path": pdf_path, "summary": summary, "signal": signal_info, "signal_id": signal_id, "s3_url": presigned_url}
+
     except Exception as e:
-        print(f"❌ Error in generate_pdf_for_signal: {e}")
+        print(f"[ERROR] generate_pdf_for_signal: {e}")
         import traceback
-        print(f"Stack trace: {traceback.format_exc()}")
+        print(traceback.format_exc())
         return {"error": str(e)}
+
 
 # # algo/runner.py
 # import datetime
