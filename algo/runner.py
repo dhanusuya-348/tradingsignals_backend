@@ -9,6 +9,7 @@ import concurrent.futures
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Use relative imports since we're inside the algo folder
+from database.db_manager import get_signal_by_id
 from .data.fetch_price import get_price_data
 from .data.fetch_sentiment import get_sentiment_score
 from .indicators.macd import calculate_macd
@@ -278,6 +279,131 @@ def generate_pdf_report_full(symbol: str):
         print(f"Stack trace: {traceback.format_exc()}")
         return {"error": str(e)}
 
+def generate_pdf_for_signal(signal_id):
+    """
+    Generate PDF report for a specific signal by signal_id.
+    This fetches the signal from the database and creates a PDF for it.
+    
+    Args:
+        signal_id (str): The unique ID of the signal
+        
+    Returns:
+        dict: Contains pdf_path and signal data, or error message
+    """
+    try:
+        print(f"📄 Starting PDF generation for signal_id: {signal_id}")
+        
+        # Step 1: Fetch signal from database
+        signal_data = get_signal_by_id(signal_id)
+        
+        if not signal_data:
+            return {"error": f"Signal with ID {signal_id} not found in database"}
+        
+        print(f"✅ Signal found: {signal_data.get('symbol')} - {signal_data.get('signal')}")
+        
+        # Step 2: Extract signal information
+        symbol = signal_data.get('symbol')
+        interval = signal_data.get('interval', '15m')
+        
+        # Reconstruct signal_info structure (matching your existing format)
+        signal_info = {
+            "symbol": symbol,
+            "interval": interval,
+            "signal": signal_data.get('signal', 'HOLD'),
+            "confidence": signal_data.get('confidence', 0),
+            "price": signal_data.get('price', 0),
+            "sentiment": signal_data.get('sentiment', 'neutral'),
+            "indicators": signal_data.get('indicators', {}),
+            "strategies": signal_data.get('strategies', {}),
+            "decision": signal_data.get('decision', 'REJECTED'),
+            "timestamp": signal_data.get('created_at', datetime.datetime.utcnow().isoformat()),
+            "scored_headlines": signal_data.get('scored_headlines', [])
+        }
+        
+        # Risk info
+        risk_info = signal_data.get('risk', {})
+        
+        # Timing info
+        timing_info = signal_data.get('timing', {})
+        
+        # Convert string timestamps to datetime objects if needed
+        if isinstance(timing_info.get('start'), str):
+            timing_info['start'] = datetime.datetime.fromisoformat(timing_info['start'].replace('Z', '+00:00'))
+        if isinstance(timing_info.get('end'), str):
+            timing_info['end'] = datetime.datetime.fromisoformat(timing_info['end'].replace('Z', '+00:00'))
+        
+        # Step 3: Fetch fresh price data for backtest
+        print(f"📊 Fetching price data for {symbol} ({interval})")
+        price_df = run_with_timeout(get_price_data, symbol, interval, timeout=30, default=pd.DataFrame())
+        
+        # Step 4: Run backtest
+        try:
+            print(f"⚙️ Running backtest for {symbol}")
+            backtest_df = run_with_timeout(
+                run_backtest, 
+                price_df, 
+                symbol, 
+                interval, 
+                signal_info.get("scored_headlines", []), 
+                {interval: price_df},
+                timeout=60, 
+                default=pd.DataFrame()
+            )
+            
+            summary = run_with_timeout(
+                evaluate_backtest_results, backtest_df, timeout=15, default={}
+            ) if not backtest_df.empty else {}
+            
+            print(f"✅ Backtest completed: {len(backtest_df)} trades")
+            
+        except Exception as e:
+            print(f"⚠️ Backtest failed: {e}")
+            backtest_df = pd.DataFrame()
+            summary = {}
+        
+        # Step 5: Generate charts
+        print(f"📈 Generating charts")
+        run_with_timeout(plot_backtest_results, backtest_df, "reports/plots/backtest_chart.png", timeout=20, default=None)
+        run_with_timeout(plot_price_with_indicators, price_df, backtest_df, symbol, "reports/plots/price_chart.png", timeout=20, default=None)
+        
+        # Add price snapshot to signal_info for PDF generation
+        signal_info['price_snapshot'] = price_df
+        
+        # Step 6: Generate PDF
+        print(f"📝 Creating PDF document")
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        pdf_filename = f"Signal_{signal_id}_{symbol}_{interval}_{signal_info.get('signal', 'HOLD')}_{timestamp}.pdf"
+        pdf_path = f"reports/generated_pdfs/{pdf_filename}"
+        
+        run_with_timeout(
+            create_pdf_report,
+            symbol,
+            interval,
+            signal_info=signal_info,
+            risk_info=risk_info,
+            timing_info=timing_info,
+            summary=summary,
+            pdf_path=pdf_path,
+            backtest_df=backtest_df,
+            scored_headlines=signal_info.get("scored_headlines", []),
+            timeout=60,
+            default=None
+        )
+        
+        print(f"✅ PDF generated successfully: {pdf_path}")
+        
+        return {
+            "pdf_path": pdf_path, 
+            "summary": summary, 
+            "signal": signal_info,
+            "signal_id": signal_id
+        }
+        
+    except Exception as e:
+        print(f"❌ Error in generate_pdf_for_signal: {e}")
+        import traceback
+        print(f"Stack trace: {traceback.format_exc()}")
+        return {"error": str(e)}
 
 # # algo/runner.py
 # import datetime
