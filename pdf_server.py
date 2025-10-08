@@ -1,4 +1,3 @@
-# pdf_server.py
 import os
 import time
 import threading
@@ -7,33 +6,35 @@ from pathlib import Path
 from typing import Dict
 import matplotlib
 matplotlib.use('Agg')  # Avoid GUI issues
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+
+# Your algorithm imports
 from algo.runner import generate_pdf_report_full, generate_pdf_for_signal
 
-# ✅ DB utils (import your existing DB connection helper)
-from db import get_db_connection  # make sure this exists in your project
+# ✅ Use SQLAlchemy session instead of raw MySQL
+from models import get_session
 
 
-# -----------------------------
+# ============================================================
 # ✅ ENV LOADER
-# -----------------------------
+# ============================================================
 def load_env_file() -> bool:
     """Load environment variables from .env file"""
-    env_file = Path(__file__).parent / '.env'
+    env_file = Path(__file__).parent / ".env"
     if not env_file.exists():
         print(f"[WARN] .env file not found at {env_file}")
         return False
     try:
-        with open(env_file, 'r', encoding='utf-8') as f:
+        with open(env_file, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith('#'):
+                if not line or line.startswith("#"):
                     continue
-                if '=' in line:
-                    key, value = line.split('=', 1)
-                    key = key.strip()
-                    value = value.strip()
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    key, value = key.strip(), value.strip()
                     if value.startswith('"') and value.endswith('"'):
                         value = value[1:-1]
                     elif value.startswith("'") and value.endswith("'"):
@@ -46,34 +47,46 @@ def load_env_file() -> bool:
         print(f"[ERROR] Failed to load .env file: {e}")
         return False
 
+
 load_env_file()
 
 
-# -----------------------------
+# ============================================================
 # ✅ FLASK APP
-# -----------------------------
+# ============================================================
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "http://localhost:3000",
+            "https://main.d2lu8gx2f335fg.amplifyapp.com"
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
 
 
-# -----------------------------
-# ✅ PDF BACKGROUND WORKER (runs every 1 minute)
-# -----------------------------
+# ============================================================
+# ✅ PDF BACKGROUND WORKER
+# ============================================================
 def pdf_worker_loop():
+    """Continuously checks DB for initiated PDFs and generates them"""
     while True:
         try:
-            conn = get_db_connection()
-            cursor = conn.cursor(dictionary=True)
+            session = get_session()
 
-            # Fetch all signals that need PDF generation
-            cursor.execute("SELECT signal_id FROM user_signals WHERE pdf_status = 'initiated'")
-            rows = cursor.fetchall()
+            # Fetch pending PDFs
+            rows = session.execute(
+                "SELECT signal_id FROM user_signals WHERE pdf_status = 'initiated'"
+            ).fetchall()
 
             if rows:
                 print(f"[INFO] Found {len(rows)} pending PDFs to generate")
 
             for row in rows:
-                signal_id = str(row["signal_id"])
+                signal_id = str(row[0])
                 print(f"[INFO] Generating PDF for signal_id: {signal_id}")
 
                 try:
@@ -81,14 +94,16 @@ def pdf_worker_loop():
 
                     if result.get("s3_url"):
                         pdf_url = result["s3_url"]
-                        # Update DB with generated PDF URL
-                        cursor.execute("""
+
+                        session.execute("""
                             UPDATE user_signals
-                            SET pdf_status = 'generated', pdf_url = %s
-                            WHERE signal_id = %s
-                        """, (pdf_url, signal_id))
-                        conn.commit()
+                            SET pdf_status = 'generated', pdf_url = :pdf_url
+                            WHERE signal_id = :signal_id
+                        """, {"pdf_url": pdf_url, "signal_id": signal_id})
+                        session.commit()
+
                         print(f"[SUCCESS] PDF generated and uploaded for signal_id {signal_id}")
+
                     else:
                         print(f"[ERROR] PDF generation failed for signal_id {signal_id}: {result.get('error')}")
 
@@ -96,20 +111,19 @@ def pdf_worker_loop():
                     print(f"[ERROR] Exception during PDF generation for signal_id {signal_id}: {e}")
                     traceback.print_exc()
 
-            cursor.close()
-            conn.close()
+            session.close()
 
         except Exception as e:
             print(f"[ERROR] PDF worker loop failed: {e}")
             traceback.print_exc()
 
-        # Sleep for 1 minute before next check
+        # Sleep before next cycle
         time.sleep(60)
 
 
-# -----------------------------
-# ✅ ENDPOINT: Generate PDF for specific signal (manual trigger)
-# -----------------------------
+# ============================================================
+# ✅ API: Generate PDF manually for a specific signal
+# ============================================================
 @app.route("/generate-pdf", methods=["POST"])
 def generate_pdf() -> Dict:
     try:
@@ -129,6 +143,16 @@ def generate_pdf() -> Dict:
             print(f"[WARN] PDF generated but failed to upload to S3")
             return jsonify({"error": "PDF generated but S3 upload failed"}), 500
 
+        # ✅ Update DB record too
+        session = get_session()
+        session.execute("""
+            UPDATE user_signals
+            SET pdf_status = 'generated', pdf_url = :pdf_url
+            WHERE signal_id = :signal_id
+        """, {"pdf_url": s3_url, "signal_id": signal_id})
+        session.commit()
+        session.close()
+
         print(f"[SUCCESS] PDF successfully generated and uploaded to S3: {s3_url}")
         return jsonify({
             "signal_id": signal_id,
@@ -142,9 +166,9 @@ def generate_pdf() -> Dict:
         return jsonify({"error": str(e)}), 500
 
 
-# -----------------------------
-# ✅ LEGACY ENDPOINT: Generate PDF for symbol (for live signal)
-# -----------------------------
+# ============================================================
+# ✅ LEGACY ENDPOINT: Generate PDF for symbol (for live use)
+# ============================================================
 @app.route("/download-pdf/<symbol>")
 def download_pdf(symbol: str) -> Dict:
     try:
@@ -173,15 +197,16 @@ def download_pdf(symbol: str) -> Dict:
         return jsonify({"error": str(e)}), 500
 
 
-# -----------------------------
+# ============================================================
 # ✅ MAIN ENTRY POINT
-# -----------------------------
+# ============================================================
 if __name__ == "__main__":
     print("[INFO] Starting PDF server...")
 
-    # Start background PDF worker thread
+    # Background PDF worker (runs every 1 min)
     threading.Thread(target=pdf_worker_loop, daemon=True).start()
 
+    # Start Flask app
     app.run(host="0.0.0.0", port=8001)
 
 
