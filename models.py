@@ -60,10 +60,15 @@ class UserSignal(Base):
     signal_id = Column(Integer, ForeignKey("signals.id"), nullable=False)
     delivery_status = Column(String, default="pending", nullable=False)  # pending/sent/failed
 
+    # === PDF-related columns ===
+    pdf_status = Column(String, nullable=True)  # NULL / 'initiated' / 'generated' / 'failed'
+    pdf_url = Column(String, nullable=True)     # S3 URL once PDF is generated
+
     signal = relationship("Signal", back_populates="users")
 
     def __repr__(self):
-        return f"<UserSignal(user_sub={self.user_sub}, signal_id={self.signal_id}, status={self.delivery_status})>"
+        return (f"<UserSignal(user_sub={self.user_sub}, signal_id={self.signal_id}, "
+                f"delivery_status={self.delivery_status}, pdf_status={self.pdf_status})>")
 
 class User(Base):
     """

@@ -463,6 +463,57 @@ def get_user_returns(user_sub):
     except Exception as e:
         return {"error": str(e)}, 500
 
+@application.route("/api/user-signals/<int:user_signal_id>/request-pdf", methods=["POST"])
+def request_pdf(user_signal_id):
+    """
+    Mark pdf_status as 'initiated' for a specific UserSignal.
+    The PDF worker running every minute will pick it up and generate the PDF.
+    """
+    try:
+        with get_session_context() as session:
+            user_signal = session.query(UserSignal).filter_by(id=user_signal_id).first()
+            if not user_signal:
+                return jsonify({"error": "UserSignal not found"}), 404
+
+            # If already generated, return the existing URL
+            if user_signal.pdf_status == "generated":
+                return jsonify({
+                    "message": "PDF already generated",
+                    "pdf_url": user_signal.pdf_url
+                })
+
+            # Initiate PDF generation
+            user_signal.pdf_status = "initiated"
+            user_signal.pdf_url = None
+            session.add(user_signal)
+
+        return jsonify({"message": "PDF generation initiated"}), 202
+
+    except Exception as e:
+        print(f"Error initiating PDF: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@application.route("/api/user-signals/<int:user_signal_id>/pdf-status", methods=["GET"])
+def pdf_status(user_signal_id):
+    """
+    Return the current pdf_status and s3 URL (if ready) for a user signal.
+    """
+    try:
+        with get_session_context() as session:
+            user_signal = session.query(UserSignal).filter_by(id=user_signal_id).first()
+            if not user_signal:
+                return jsonify({"error": "UserSignal not found"}), 404
+
+            return jsonify({
+                "pdf_status": user_signal.pdf_status,
+                "pdf_url": user_signal.pdf_url
+            })
+
+    except Exception as e:
+        print(f"Error checking PDF status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ======================
 # SUBSCRIPTION ROUTES
 # ======================
