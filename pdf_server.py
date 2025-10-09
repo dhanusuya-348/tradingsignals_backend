@@ -4,19 +4,6 @@ import time
 import threading
 import traceback
 from pathlib import Path
-from typing import Dict
-import matplotlib
-matplotlib.use('Agg')  # Avoid GUI issues
-
-from flask import Flask, jsonify, request
-from sqlalchemy import text
-
-# Your algorithm imports
-from algo.runner import generate_pdf_report_full, generate_pdf_for_signal
-
-# ✅ Use SQLAlchemy session instead of raw MySQL
-from models import get_session
-
 
 # ============================================================
 # ✅ ENV LOADER
@@ -51,6 +38,18 @@ def load_env_file() -> bool:
 
 load_env_file()
 
+from typing import Dict
+import matplotlib
+matplotlib.use('Agg')  # Avoid GUI issues
+
+from flask import Flask, jsonify, request
+from sqlalchemy import text
+
+# Your algorithm imports
+from algo.runner import generate_pdf_report_full, generate_pdf_for_signal
+
+# ✅ Use SQLAlchemy session instead of raw MySQL
+from models import get_session
 
 # ============================================================
 # ✅ FLASK APP WITH MANUAL CORS (avoiding flask-cors library)
@@ -82,25 +81,22 @@ def add_cors_headers(response):
 # ✅ PDF BACKGROUND WORKER
 # ============================================================
 def pdf_worker_loop():
-    """Continuously checks DB for initiated PDFs and generates them"""
+    """Continuously checks DB for initiated PDFs and generates them ONE AT A TIME"""
     while True:
         try:
             session = get_session()
 
-            # Fetch pending PDFs
-            rows = session.execute(
-                text("SELECT signal_id FROM user_signals WHERE pdf_status = 'initiated'")
-            ).fetchall()
+            # ✅ Fetch ONLY ONE pending PDF at a time (LIMIT 1)
+            row = session.execute(
+                text("SELECT signal_id FROM user_signals WHERE pdf_status = 'initiated' LIMIT 1")
+            ).fetchone()
 
-            if rows:
-                print(f"[INFO] Found {len(rows)} pending PDFs to generate")
-
-            for row in rows:
+            if row:
                 signal_id = str(row[0])
-                print(f"[INFO] Generating PDF for signal_id: {signal_id}")
+                print(f"[INFO] ⏳ Starting PDF generation for signal_id: {signal_id}")
 
                 try:
-                    # Generate PDF (this can take 15 minutes)
+                    # Generate PDF
                     result = generate_pdf_for_signal(signal_id)
 
                     if result.get("s3_url"):
@@ -114,12 +110,12 @@ def pdf_worker_loop():
                         """), {"pdf_url": pdf_url, "signal_id": signal_id})
                         session.commit()
 
-                        print(f"[SUCCESS] PDF generated and uploaded for signal_id {signal_id}")
+                        print(f"[SUCCESS] ✅ PDF generated and uploaded for signal_id {signal_id}: {pdf_url}")
 
                     else:
                         # Mark as failed
                         error_msg = result.get('error', 'Unknown error')
-                        print(f"[ERROR] PDF generation failed for signal_id {signal_id}: {error_msg}")
+                        print(f"[ERROR] ❌ PDF generation failed for signal_id {signal_id}: {error_msg}")
                         
                         session.execute(text("""
                             UPDATE user_signals
@@ -129,7 +125,7 @@ def pdf_worker_loop():
                         session.commit()
 
                 except Exception as e:
-                    print(f"[ERROR] Exception during PDF generation for signal_id {signal_id}: {e}")
+                    print(f"[ERROR] 💥 Exception during PDF generation for signal_id {signal_id}: {e}")
                     traceback.print_exc()
                     
                     # Mark as failed on exception
@@ -142,6 +138,8 @@ def pdf_worker_loop():
                         session.commit()
                     except Exception as db_err:
                         print(f"[ERROR] Failed to update DB status: {db_err}")
+            else:
+                print("[INFO] 😴 No pending PDFs found, sleeping...")
 
             session.close()
 
@@ -151,7 +149,6 @@ def pdf_worker_loop():
 
         # Sleep before next cycle
         time.sleep(60)
-
 
 # ============================================================
 # ✅ API: Request PDF generation for a signal
@@ -279,7 +276,7 @@ if __name__ == "__main__":
 
     # Start Flask app
     app.run(host="0.0.0.0", port=8001)
-    
+
 # # pdf_server.py
 # import os
 # from pathlib import Path
