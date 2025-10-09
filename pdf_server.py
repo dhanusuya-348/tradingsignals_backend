@@ -59,11 +59,12 @@ app = Flask(__name__)
 CORS(app, resources={
     r"/*": {
         "origins": [
-            "http://localhost:3000",
-            "https://main.d2lu8gx2f335fg.amplifyapp.com"
+            "https://main.d2lu8gx2f335fg.amplifyapp.com",
+            "http://localhost:3000"
         ],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
+        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Amz-Date", "X-Api-Key"],
+        "supports_credentials": True
     }
 })
 

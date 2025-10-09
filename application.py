@@ -12,15 +12,18 @@ from algo.runner import generate_pdf_report_full
 application = Flask(__name__)
 
 # Enable CORS for Amplify frontend
-CORS(
-    application,
-    resources={r"/*": {"origins": [
-        "https://main.d2lu8gx2f335fg.amplifyapp.com",
-        "http://localhost:3000"
-    ]}},
-    supports_credentials=True,
-    allow_headers=["Content-Type", "Authorization", "X-Amz-Date", "X-Api-Key"]
-)
+CORS(application, resources={
+    r"/*": {
+        "origins": [
+            "https://main.d2lu8gx2f335fg.amplifyapp.com",
+            "http://localhost:3000"
+        ],
+        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Amz-Date", "X-Api-Key"],
+        "supports_credentials": True
+    }
+})
+
 
 # Create tables at startup
 engine = get_engine_from_env()
