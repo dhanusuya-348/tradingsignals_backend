@@ -3,6 +3,7 @@ import os
 import time
 import threading
 import traceback
+import sys
 from pathlib import Path
 
 # ============================================================
@@ -12,7 +13,7 @@ def load_env_file() -> bool:
     """Load environment variables from .env file"""
     env_file = Path(__file__).parent / ".env"
     if not env_file.exists():
-        print(f"[WARN] .env file not found at {env_file}")
+        print(f"[WARN] .env file not found at {env_file}", flush=True)
         return False
     try:
         with open(env_file, "r", encoding="utf-8") as f:
@@ -29,10 +30,10 @@ def load_env_file() -> bool:
                         value = value[1:-1]
                     if key not in os.environ:
                         os.environ[key] = value
-        print(f"[INFO] Loaded environment variables from {env_file}")
+        print(f"[INFO] Loaded environment variables from {env_file}", flush=True)
         return True
     except Exception as e:
-        print(f"[ERROR] Failed to load .env file: {e}")
+        print(f"[ERROR] Failed to load .env file: {e}", flush=True)
         return False
 
 
@@ -46,23 +47,21 @@ from flask import Flask, jsonify, request
 from sqlalchemy import text
 
 # Your algorithm imports
-from algo.runner import generate_pdf_report_full, generate_pdf_for_signal
+from algo.runner import generate_pdf_for_signal
 
 # ✅ Use SQLAlchemy session instead of raw MySQL
 from models import get_session
 
 # ============================================================
-# ✅ FLASK APP WITH MANUAL CORS (avoiding flask-cors library)
+# ✅ FLASK APP WITH MANUAL CORS
 # ============================================================
 app = Flask(__name__)
 
-# ✅ Manual CORS handler - cleaner approach
 @app.after_request
 def add_cors_headers(response):
     """Add CORS headers to all responses"""
     origin = request.headers.get('Origin')
     
-    # Only allow specific origins
     allowed_origins = [
         'https://main.d2lu8gx2f335fg.amplifyapp.com',
         'http://localhost:3000'
@@ -78,204 +77,191 @@ def add_cors_headers(response):
 
 
 # ============================================================
-# ✅ PDF BACKGROUND WORKER
+# ✅ PDF BACKGROUND WORKER - Processes ONE UserSignal at a time
 # ============================================================
 def pdf_worker_loop():
     """Continuously checks DB for initiated PDFs and generates them ONE AT A TIME"""
+    print("[INFO] 🚀 PDF Worker thread started!", flush=True)
+    
     while True:
         try:
             session = get_session()
 
-            # ✅ Fetch ONLY ONE pending PDF at a time (LIMIT 1)
+            # ✅ Fetch ONE pending UserSignal row
             row = session.execute(
-                text("SELECT signal_id FROM user_signals WHERE pdf_status = 'initiated' LIMIT 1")
+                text("""
+                    SELECT id, signal_id, user_sub 
+                    FROM user_signals 
+                    WHERE pdf_status = 'initiated' 
+                    LIMIT 1
+                """)
             ).fetchone()
 
             if row:
-                signal_id = str(row[0])
-                print(f"[INFO] ⏳ Starting PDF generation for signal_id: {signal_id}")
+                user_signal_id, signal_id, user_sub = row[0], row[1], row[2]
+                print(f"\n[INFO] ⏳ Processing UserSignal ID: {user_signal_id}", flush=True)
+                print(f"[INFO] Signal ID: {signal_id}, User: {user_sub}", flush=True)
 
                 try:
-                    # Generate PDF
-                    result = generate_pdf_for_signal(signal_id)
+                    # Generate PDF for this signal
+                    result = generate_pdf_for_signal(str(signal_id))
 
                     if result.get("s3_url"):
                         pdf_url = result["s3_url"]
 
-                        # Mark as generated
+                        # ✅ Update ONLY this UserSignal row
                         session.execute(text("""
                             UPDATE user_signals
                             SET pdf_status = 'generated', pdf_url = :pdf_url
-                            WHERE signal_id = :signal_id
-                        """), {"pdf_url": pdf_url, "signal_id": signal_id})
+                            WHERE id = :user_signal_id
+                        """), {"pdf_url": pdf_url, "user_signal_id": user_signal_id})
                         session.commit()
 
-                        print(f"[SUCCESS] ✅ PDF generated and uploaded for signal_id {signal_id}: {pdf_url}")
+                        print(f"[SUCCESS] ✅ PDF generated for UserSignal ID {user_signal_id}", flush=True)
+                        print(f"[SUCCESS] PDF URL: {pdf_url}", flush=True)
 
                     else:
-                        # Mark as failed
                         error_msg = result.get('error', 'Unknown error')
-                        print(f"[ERROR] ❌ PDF generation failed for signal_id {signal_id}: {error_msg}")
+                        print(f"[ERROR] ❌ PDF generation failed: {error_msg}", flush=True)
                         
                         session.execute(text("""
                             UPDATE user_signals
                             SET pdf_status = 'failed'
-                            WHERE signal_id = :signal_id
-                        """), {"signal_id": signal_id})
+                            WHERE id = :user_signal_id
+                        """), {"user_signal_id": user_signal_id})
                         session.commit()
 
                 except Exception as e:
-                    print(f"[ERROR] 💥 Exception during PDF generation for signal_id {signal_id}: {e}")
+                    print(f"[ERROR] 💥 Exception during PDF generation: {e}", flush=True)
                     traceback.print_exc()
                     
-                    # Mark as failed on exception
                     try:
                         session.execute(text("""
                             UPDATE user_signals
                             SET pdf_status = 'failed'
-                            WHERE signal_id = :signal_id
-                        """), {"signal_id": signal_id})
+                            WHERE id = :user_signal_id
+                        """), {"user_signal_id": user_signal_id})
                         session.commit()
                     except Exception as db_err:
-                        print(f"[ERROR] Failed to update DB status: {db_err}")
+                        print(f"[ERROR] Failed to update DB: {db_err}", flush=True)
             else:
-                print("[INFO] 😴 No pending PDFs found, sleeping...")
+                print("[INFO] 😴 No pending PDFs, sleeping 60s...", flush=True)
 
             session.close()
 
         except Exception as e:
-            print(f"[ERROR] PDF worker loop failed: {e}")
+            print(f"[ERROR] Worker loop error: {e}", flush=True)
             traceback.print_exc()
 
-        # Sleep before next cycle
         time.sleep(60)
 
+
 # ============================================================
-# ✅ API: Request PDF generation for a signal
+# ✅ API: Request PDF for specific user's signal
 # ============================================================
-@app.route("/api/user-signals/<int:signal_id>/request-pdf", methods=["POST", "OPTIONS"])
-def request_pdf_for_signal(signal_id):
-    """Initiate PDF generation for a specific signal"""
+@app.route("/api/user-signals/<user_sub>/<int:signal_id>/request-pdf", methods=["POST", "OPTIONS"])
+def request_pdf_for_user_signal(user_sub, signal_id):
+    """Initiate PDF generation for a specific user's signal"""
     
-    # Handle CORS preflight
     if request.method == "OPTIONS":
         return "", 200
         
     try:
         session = get_session()
         
-        print(f"[INFO] PDF generation request received for signal_id: {signal_id}")
+        print(f"\n[INFO] 📄 PDF Request received", flush=True)
+        print(f"[INFO] user_sub: {user_sub}", flush=True)
+        print(f"[INFO] signal_id: {signal_id}", flush=True)
         
-        # Update pdf_status to 'initiated' for all user_signals with this signal_id
-        result = session.execute(text("""
+        # ✅ Find UserSignal row for this user + signal
+        user_signal = session.execute(text("""
+            SELECT id, pdf_status, pdf_url FROM user_signals 
+            WHERE user_sub = :user_sub AND signal_id = :signal_id
+            LIMIT 1
+        """), {"user_sub": user_sub, "signal_id": signal_id}).fetchone()
+        
+        if not user_signal:
+            # Create new UserSignal if doesn't exist
+            session.execute(text("""
+                INSERT INTO user_signals (user_sub, signal_id, pdf_status, delivery_status, created_at)
+                VALUES (:user_sub, :signal_id, 'initiated', 'sent', NOW())
+            """), {"user_sub": user_sub, "signal_id": signal_id})
+            session.commit()
+            print(f"[INFO] ✨ Created new UserSignal row", flush=True)
+            
+            session.close()
+            return jsonify({
+                "message": "PDF generation initiated",
+                "signal_id": signal_id,
+                "estimated_time_minutes": 15
+            }), 202
+        
+        user_signal_id, pdf_status, pdf_url = user_signal[0], user_signal[1], user_signal[2]
+        
+        # If already generated, return URL
+        if pdf_status == 'generated' and pdf_url:
+            print(f"[INFO] PDF already exists: {pdf_url}", flush=True)
+            session.close()
+            return jsonify({
+                "message": "PDF already generated",
+                "pdf_url": pdf_url
+            }), 200
+        
+        # Set to 'initiated'
+        session.execute(text("""
             UPDATE user_signals
             SET pdf_status = 'initiated'
-            WHERE signal_id = :signal_id AND (pdf_status IS NULL OR pdf_status != 'generated')
-        """), {"signal_id": signal_id})
-        
+            WHERE id = :user_signal_id
+        """), {"user_signal_id": user_signal_id})
         session.commit()
-        rows_updated = result.rowcount
+        
+        print(f"[INFO] ✅ Set pdf_status='initiated' for UserSignal ID {user_signal_id}", flush=True)
+        
         session.close()
         
-        print(f"[INFO] PDF generation initiated for {rows_updated} user(s) with signal_id: {signal_id}")
-        
         return jsonify({
-            "message": "PDF generation initiated. This will take approximately 15 minutes. You can leave this page and check back later.",
+            "message": "PDF generation initiated",
             "signal_id": signal_id,
-            "users_updated": rows_updated,
             "estimated_time_minutes": 15
         }), 202
         
     except Exception as e:
-        print(f"[ERROR] Failed to initiate PDF generation: {e}")
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-    
-@app.route("/generate-pdf", methods=["POST"])
-def generate_pdf() -> Dict:
-    try:
-        signal_id = request.args.get("signal_id")
-        if not signal_id:
-            return jsonify({"error": "signal_id parameter is required"}), 400
-
-        print(f"[INFO] Starting manual PDF generation for signal_id: {signal_id}")
-        result = generate_pdf_for_signal(signal_id)
-
-        if "error" in result:
-            print(f"[ERROR] PDF generation failed: {result['error']}")
-            return jsonify({"error": result["error"]}), 500
-
-        s3_url = result.get("s3_url")
-        if not s3_url:
-            print(f"[WARN] PDF generated but failed to upload to S3")
-            return jsonify({"error": "PDF generated but S3 upload failed"}), 500
-
-        # ✅ Update DB record too
-        session = get_session()
-        session.execute(text("""
-            UPDATE user_signals
-            SET pdf_status = 'generated', pdf_url = :pdf_url
-            WHERE signal_id = :signal_id
-        """), {"pdf_url": s3_url, "signal_id": signal_id})
-        session.commit()
-        session.close()
-
-        print(f"[SUCCESS] PDF successfully generated and uploaded to S3: {s3_url}")
-        return jsonify({
-            "signal_id": signal_id,
-            "s3_url": s3_url,
-            "signal_info": result.get("signal")
-        })
-
-    except Exception as e:
-        print(f"[ERROR] Exception in /generate-pdf: {e}")
+        print(f"[ERROR] Failed to initiate PDF: {e}", flush=True)
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 
 # ============================================================
-# ✅ LEGACY ENDPOINT: Generate PDF for symbol (for live use)
+# ✅ HEALTH CHECK
 # ============================================================
-@app.route("/download-pdf/<symbol>")
-def download_pdf(symbol: str) -> Dict:
-    try:
-        print(f"[INFO] Legacy endpoint called for symbol: {symbol}")
-        result = generate_pdf_report_full(symbol)
-
-        if "error" in result:
-            print(f"[ERROR] PDF generation failed for symbol {symbol}: {result['error']}")
-            return jsonify({"error": result["error"]}), 500
-
-        s3_url = result.get("s3_url")
-        if not s3_url:
-            print(f"[WARN] PDF generated but failed to upload to S3")
-            return jsonify({"error": "PDF generated but S3 upload failed"}), 500
-
-        print(f"[SUCCESS] PDF successfully generated and uploaded to S3: {s3_url}")
-        return jsonify({
-            "symbol": symbol,
-            "s3_url": s3_url,
-            "signal_info": result.get("signal")
-        })
-
-    except Exception as e:
-        print(f"[ERROR] Exception in /download-pdf: {e}")
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+@app.route("/health", methods=["GET"])
+def health_check():
+    return jsonify({
+        "status": "healthy", 
+        "service": "pdf-server",
+        "port": 8001
+    }), 200
 
 
 # ============================================================
 # ✅ MAIN ENTRY POINT
 # ============================================================
 if __name__ == "__main__":
-    print("[INFO] Starting PDF server...")
+    print("\n" + "="*60, flush=True)
+    print("[INFO] 🔥 PDF SERVER STARTING", flush=True)
+    print("="*60, flush=True)
+    print(f"[INFO] Python: {sys.version}", flush=True)
+    print(f"[INFO] Working Dir: {os.getcwd()}", flush=True)
+    print(f"[INFO] Port: 8001", flush=True)
+    print("="*60 + "\n", flush=True)
 
-    # Background PDF worker (runs every 1 min)
-    threading.Thread(target=pdf_worker_loop, daemon=True).start()
+    # Start background worker
+    worker = threading.Thread(target=pdf_worker_loop, daemon=True)
+    worker.start()
+    print(f"[INFO] ✅ Worker thread alive: {worker.is_alive()}\n", flush=True)
 
-    # Start Flask app
-    app.run(host="0.0.0.0", port=8001)
+    # Start Flask
+    app.run(host="0.0.0.0", port=8001, debug=False)
 
 # # pdf_server.py
 # import os
