@@ -100,11 +100,13 @@ def pdf_worker_loop():
                 print(f"[INFO] Generating PDF for signal_id: {signal_id}")
 
                 try:
+                    # Generate PDF (this can take 15 minutes)
                     result = generate_pdf_for_signal(signal_id)
 
                     if result.get("s3_url"):
                         pdf_url = result["s3_url"]
 
+                        # Mark as generated
                         session.execute(text("""
                             UPDATE user_signals
                             SET pdf_status = 'generated', pdf_url = :pdf_url
@@ -115,11 +117,31 @@ def pdf_worker_loop():
                         print(f"[SUCCESS] PDF generated and uploaded for signal_id {signal_id}")
 
                     else:
-                        print(f"[ERROR] PDF generation failed for signal_id {signal_id}: {result.get('error')}")
+                        # Mark as failed
+                        error_msg = result.get('error', 'Unknown error')
+                        print(f"[ERROR] PDF generation failed for signal_id {signal_id}: {error_msg}")
+                        
+                        session.execute(text("""
+                            UPDATE user_signals
+                            SET pdf_status = 'failed'
+                            WHERE signal_id = :signal_id
+                        """), {"signal_id": signal_id})
+                        session.commit()
 
                 except Exception as e:
                     print(f"[ERROR] Exception during PDF generation for signal_id {signal_id}: {e}")
                     traceback.print_exc()
+                    
+                    # Mark as failed on exception
+                    try:
+                        session.execute(text("""
+                            UPDATE user_signals
+                            SET pdf_status = 'failed'
+                            WHERE signal_id = :signal_id
+                        """), {"signal_id": signal_id})
+                        session.commit()
+                    except Exception as db_err:
+                        print(f"[ERROR] Failed to update DB status: {db_err}")
 
             session.close()
 
@@ -161,9 +183,10 @@ def request_pdf_for_signal(signal_id):
         print(f"[INFO] PDF generation initiated for {rows_updated} user(s) with signal_id: {signal_id}")
         
         return jsonify({
-            "message": "PDF generation initiated",
+            "message": "PDF generation initiated. This will take approximately 15 minutes. You can leave this page and check back later.",
             "signal_id": signal_id,
-            "users_updated": rows_updated
+            "users_updated": rows_updated,
+            "estimated_time_minutes": 15
         }), 202
         
     except Exception as e:
@@ -256,7 +279,7 @@ if __name__ == "__main__":
 
     # Start Flask app
     app.run(host="0.0.0.0", port=8001)
-
+    
 # # pdf_server.py
 # import os
 # from pathlib import Path
