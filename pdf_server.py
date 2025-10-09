@@ -57,6 +57,15 @@ load_env_file()
 # ============================================================
 app = Flask(__name__)
 
+# Add this at the top after CORS setup
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    response.headers.add('Access-Control-Max-Age', '3600')
+    return response
+
 CORS(app, resources={
     r"/*": {
         "origins": [
