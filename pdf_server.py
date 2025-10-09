@@ -9,7 +9,6 @@ import matplotlib
 matplotlib.use('Agg')  # Avoid GUI issues
 
 from flask import Flask, jsonify, request
-# ❌ REMOVED: from flask_cors import CORS - CloudFront handles CORS now
 
 # Your algorithm imports
 from algo.runner import generate_pdf_report_full, generate_pdf_for_signal
@@ -53,12 +52,29 @@ load_env_file()
 
 
 # ============================================================
-# ✅ FLASK APP - NO CORS (CloudFront handles it)
+# ✅ FLASK APP WITH MANUAL CORS (avoiding flask-cors library)
 # ============================================================
 app = Flask(__name__)
 
-# ❌ REMOVED: @app.after_request (causes duplicate headers)
-# ❌ REMOVED: CORS(app, ...) (CloudFront Response Headers Policy handles this)
+# ✅ Manual CORS handler - cleaner approach
+@app.after_request
+def add_cors_headers(response):
+    """Add CORS headers to all responses"""
+    origin = request.headers.get('Origin')
+    
+    # Only allow specific origins
+    allowed_origins = [
+        'https://main.d2lu8gx2f335fg.amplifyapp.com',
+        'http://localhost:3000'
+    ]
+    
+    if origin in allowed_origins:
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '3600'
+    
+    return response
 
 
 # ============================================================
@@ -121,7 +137,7 @@ def pdf_worker_loop():
 def request_pdf_for_signal(signal_id):
     """Initiate PDF generation for a specific signal"""
     
-    # Handle CORS preflight - CloudFront will add the headers
+    # Handle CORS preflight
     if request.method == "OPTIONS":
         return "", 200
         
