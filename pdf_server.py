@@ -9,7 +9,7 @@ import matplotlib
 matplotlib.use('Agg')  # Avoid GUI issues
 
 from flask import Flask, jsonify, request
-from flask_cors import CORS
+# ❌ REMOVED: from flask_cors import CORS - CloudFront handles CORS now
 
 # Your algorithm imports
 from algo.runner import generate_pdf_report_full, generate_pdf_for_signal
@@ -53,30 +53,12 @@ load_env_file()
 
 
 # ============================================================
-# ✅ FLASK APP
+# ✅ FLASK APP - NO CORS (CloudFront handles it)
 # ============================================================
 app = Flask(__name__)
 
-# Add this at the top after CORS setup
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
-    response.headers.add('Access-Control-Max-Age', '3600')
-    return response
-
-CORS(app, resources={
-    r"/*": {
-        "origins": [
-            "https://main.d2lu8gx2f335fg.amplifyapp.com",
-            "http://localhost:3000"
-        ],
-        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization", "X-Amz-Date", "X-Api-Key"],
-        "supports_credentials": True
-    }
-})
+# ❌ REMOVED: @app.after_request (causes duplicate headers)
+# ❌ REMOVED: CORS(app, ...) (CloudFront Response Headers Policy handles this)
 
 
 # ============================================================
@@ -133,18 +115,15 @@ def pdf_worker_loop():
 
 
 # ============================================================
-# ✅ API: Generate PDF manually for a specific signal
-# ============================================================
-# ============================================================
 # ✅ API: Request PDF generation for a signal
 # ============================================================
 @app.route("/api/user-signals/<int:signal_id>/request-pdf", methods=["POST", "OPTIONS"])
 def request_pdf_for_signal(signal_id):
     """Initiate PDF generation for a specific signal"""
     
-    # Handle CORS preflight
+    # Handle CORS preflight - CloudFront will add the headers
     if request.method == "OPTIONS":
-        return jsonify({"status": "ok"}), 200
+        return "", 200
         
     try:
         session = get_session()
@@ -174,6 +153,7 @@ def request_pdf_for_signal(signal_id):
         print(f"[ERROR] Failed to initiate PDF generation: {e}")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
     
 @app.route("/generate-pdf", methods=["POST"])
 def generate_pdf() -> Dict:
