@@ -9,6 +9,7 @@ import matplotlib
 matplotlib.use('Agg')  # Avoid GUI issues
 
 from flask import Flask, jsonify, request
+from sqlalchemy import text
 
 # Your algorithm imports
 from algo.runner import generate_pdf_report_full, generate_pdf_for_signal
@@ -88,7 +89,7 @@ def pdf_worker_loop():
 
             # Fetch pending PDFs
             rows = session.execute(
-                "SELECT signal_id FROM user_signals WHERE pdf_status = 'initiated'"
+                text("SELECT signal_id FROM user_signals WHERE pdf_status = 'initiated'")
             ).fetchall()
 
             if rows:
@@ -104,11 +105,11 @@ def pdf_worker_loop():
                     if result.get("s3_url"):
                         pdf_url = result["s3_url"]
 
-                        session.execute("""
+                        session.execute(text("""
                             UPDATE user_signals
                             SET pdf_status = 'generated', pdf_url = :pdf_url
                             WHERE signal_id = :signal_id
-                        """, {"pdf_url": pdf_url, "signal_id": signal_id})
+                        """), {"pdf_url": pdf_url, "signal_id": signal_id})
                         session.commit()
 
                         print(f"[SUCCESS] PDF generated and uploaded for signal_id {signal_id}")
@@ -147,11 +148,11 @@ def request_pdf_for_signal(signal_id):
         print(f"[INFO] PDF generation request received for signal_id: {signal_id}")
         
         # Update pdf_status to 'initiated' for all user_signals with this signal_id
-        result = session.execute("""
+        result = session.execute(text("""
             UPDATE user_signals
             SET pdf_status = 'initiated'
             WHERE signal_id = :signal_id AND (pdf_status IS NULL OR pdf_status != 'generated')
-        """, {"signal_id": signal_id})
+        """), {"signal_id": signal_id})
         
         session.commit()
         rows_updated = result.rowcount
@@ -192,11 +193,11 @@ def generate_pdf() -> Dict:
 
         # ✅ Update DB record too
         session = get_session()
-        session.execute("""
+        session.execute(text("""
             UPDATE user_signals
             SET pdf_status = 'generated', pdf_url = :pdf_url
             WHERE signal_id = :signal_id
-        """, {"pdf_url": s3_url, "signal_id": signal_id})
+        """), {"pdf_url": s3_url, "signal_id": signal_id})
         session.commit()
         session.close()
 
@@ -255,7 +256,6 @@ if __name__ == "__main__":
 
     # Start Flask app
     app.run(host="0.0.0.0", port=8001)
-
 
 # # pdf_server.py
 # import os
