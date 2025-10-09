@@ -320,7 +320,7 @@ def remove_from_watchlist(user_sub, symbol):
 # ======================
 @application.route("/api/user-signals/<user_sub>", methods=["GET"])
 def get_user_signals_dashboard(user_sub):
-    """Fetch all signals for coins in the user's watchlist."""
+    """Fetch all signals for coins in the user's watchlist with PDF status."""
     try:
         with get_session_context() as session:
             watchlist = session.query(Watchlist).filter_by(user_sub=user_sub).all()
@@ -333,6 +333,7 @@ def get_user_signals_dashboard(user_sub):
             
             watched_symbols = [w.symbol for w in watchlist]
             
+            # Get signals with their corresponding user_signal data
             signals = session.query(Signal).filter(
                 Signal.symbol.in_(watched_symbols)
             ).order_by(
@@ -342,6 +343,13 @@ def get_user_signals_dashboard(user_sub):
             result = []
             for signal in signals:
                 payload = signal.payload or {}
+                
+                # Get the user_signal row for this user and signal
+                user_signal = session.query(UserSignal).filter_by(
+                    user_sub=user_sub,
+                    signal_id=signal.id
+                ).first()
+                
                 result.append({
                     "id": signal.id,
                     "symbol": signal.symbol,
@@ -352,7 +360,9 @@ def get_user_signals_dashboard(user_sub):
                     "risk": payload.get("risk", {}),
                     "sentiment": payload.get("sentiment", "Neutral"),
                     "strategies": payload.get("top_contributing_strategies", []),
-                    "created_at": signal.created_at.isoformat() if signal.created_at else None
+                    "created_at": signal.created_at.isoformat() if signal.created_at else None,
+                    "pdf_status": user_signal.pdf_status if user_signal else None,
+                    "pdf_url": user_signal.pdf_url if user_signal else None
                 })
             
             return jsonify({
@@ -365,7 +375,7 @@ def get_user_signals_dashboard(user_sub):
         print(f"Error fetching user signals: {e}")
         traceback.print_exc()
         return jsonify({"error": "Failed to fetch signals"}), 500
-
+    
 @application.route("/signals/<user_sub>", methods=["GET"])
 def get_user_signals(user_sub):
     """Get live signals for user's watchlist (legacy endpoint)"""

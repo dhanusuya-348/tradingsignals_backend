@@ -1,3 +1,4 @@
+#pdf-server.py
 import os
 import time
 import threading
@@ -125,6 +126,46 @@ def pdf_worker_loop():
 # ============================================================
 # ✅ API: Generate PDF manually for a specific signal
 # ============================================================
+# ============================================================
+# ✅ API: Request PDF generation for a signal
+# ============================================================
+@app.route("/api/user-signals/<int:signal_id>/request-pdf", methods=["POST", "OPTIONS"])
+def request_pdf_for_signal(signal_id):
+    """Initiate PDF generation for a specific signal"""
+    
+    # Handle CORS preflight
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
+        
+    try:
+        session = get_session()
+        
+        print(f"[INFO] PDF generation request received for signal_id: {signal_id}")
+        
+        # Update pdf_status to 'initiated' for all user_signals with this signal_id
+        result = session.execute("""
+            UPDATE user_signals
+            SET pdf_status = 'initiated'
+            WHERE signal_id = :signal_id AND (pdf_status IS NULL OR pdf_status != 'generated')
+        """, {"signal_id": signal_id})
+        
+        session.commit()
+        rows_updated = result.rowcount
+        session.close()
+        
+        print(f"[INFO] PDF generation initiated for {rows_updated} user(s) with signal_id: {signal_id}")
+        
+        return jsonify({
+            "message": "PDF generation initiated",
+            "signal_id": signal_id,
+            "users_updated": rows_updated
+        }), 202
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to initiate PDF generation: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+    
 @app.route("/generate-pdf", methods=["POST"])
 def generate_pdf() -> Dict:
     try:
