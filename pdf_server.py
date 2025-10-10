@@ -247,21 +247,57 @@ def health_check():
 # ✅ MAIN ENTRY POINT
 # ============================================================
 if __name__ == "__main__":
-    print("\n" + "="*60, flush=True)
-    print("[INFO] 🔥 PDF SERVER STARTING", flush=True)
-    print("="*60, flush=True)
-    print(f"[INFO] Python: {sys.version}", flush=True)
-    print(f"[INFO] Working Dir: {os.getcwd()}", flush=True)
-    print(f"[INFO] Port: 8001", flush=True)
-    print("="*60 + "\n", flush=True)
+    import threading
+    import sys
+    import traceback
 
-    # Start background worker
-    worker = threading.Thread(target=pdf_worker_loop, daemon=True)
-    worker.start()
-    print(f"[INFO] ✅ Worker thread alive: {worker.is_alive()}\n", flush=True)
+    print(f"[INFO] 🔥 Starting PDF Server (Python {sys.version})", flush=True)
 
-    # Start Flask
-    app.run(host="0.0.0.0", port=8001, debug=False)
+    try:
+        # Start the background worker thread
+        worker = threading.Thread(target=pdf_worker_loop, daemon=True)
+        worker.start()
+        print(f"[INFO] ✅ PDF Worker thread started (daemon mode)", flush=True)
+
+        # Start the Flask API server
+        app.run(host="0.0.0.0", port=8001)
+
+    except Exception as e:
+        print(f"[ERROR] PDF server failed to start: {e}", flush=True)
+        traceback.print_exc()
+
+
+
+# if __name__ == "__main__":
+#     # Example values
+#     test_signal_id = 750
+#     test_user_sub = "29ee8488-00b1-70d9-cf73-f09470f0edc9"
+
+#     print("\n" + "="*60, flush=True)
+#     print("[INFO] 🔥 PDF SERVER STARTING (LOCAL TEST MODE)", flush=True)
+#     print("="*60, flush=True)
+#     print(f"[INFO] Python: {sys.version}", flush=True)
+#     print(f"[INFO] Working Dir: {os.getcwd()}", flush=True)
+#     print(f"[INFO] Port: 8001", flush=True)
+#     print("="*60 + "\n", flush=True)
+
+#     # === TEMP: Directly generate PDF for testing ===
+#     try:
+#         print(f"[TEST] 🚀 Generating PDF for user_sub={test_user_sub}, signal_id={test_signal_id}")
+#         result = generate_pdf_for_signal(str(test_signal_id))
+#         print(f"[TEST] PDF generation result: {result}")
+#     except Exception as e:
+#         print(f"[ERROR] PDF generation failed: {e}", flush=True)
+#         traceback.print_exc()
+
+#     # Start background worker (optional)
+#     worker = threading.Thread(target=pdf_worker_loop, daemon=True)
+#     worker.start()
+#     print(f"[INFO] ✅ Worker thread alive: {worker.is_alive()}\n", flush=True)
+
+#     # Start Flask app
+#     app.run(host="0.0.0.0", port=8001, debug=False)
+
 
 # # pdf_server.py
 # import os
