@@ -31,7 +31,7 @@ from .reports.generate_pdf import create_pdf_report
 os.makedirs("reports/plots", exist_ok=True)
 os.makedirs("reports/generated_pdfs", exist_ok=True)
 
-# -------------------- Timeout Helper --------------------
+# -------------------- Timeout Helper (keep only for non-plot functions) --------------------
 def run_with_timeout(func, *args, timeout: int = None, default=None, **kwargs):
     try:
         if timeout is None:
@@ -190,7 +190,10 @@ def generate_pdf_report_full(symbol: str) -> Dict[str, Any]:
             evaluate_backtest_results, backtest_df, timeout=60, default={}
         ) if not backtest_df.empty else {}
 
+        # === Direct plot calls, no timeout ===
+        print("[DEBUG] Saving backtest plot...")
         plot_backtest_results(backtest_df, "reports/plots/backtest_chart.png")
+        print("[DEBUG] Saving price+indicator plot...")
         plot_price_with_indicators(price_df, backtest_df, symbol, "reports/plots/price_chart.png")
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -206,6 +209,7 @@ def generate_pdf_report_full(symbol: str) -> Dict[str, Any]:
             backtest_df=backtest_df,
             headlines=result.get("scored_headlines", [])
         )
+        print(f"[DEBUG] PDF created at {pdf_path}")
 
         try:
             presigned_url = upload_pdf_to_s3(pdf_path)
@@ -267,7 +271,10 @@ def generate_pdf_for_signal(signal_id: str) -> Dict[str, Any]:
             evaluate_backtest_results, backtest_df, timeout=60, default={}
         ) if not backtest_df.empty else {}
 
+        # === Direct plot calls, no timeout ===
+        print("[DEBUG] Saving backtest plot...")
         plot_backtest_results(backtest_df, "reports/plots/backtest_chart.png")
+        print("[DEBUG] Saving price+indicator plot...")
         plot_price_with_indicators(price_df, backtest_df, symbol, "reports/plots/price_chart.png")
         signal_info['price_snapshot'] = price_df
 
@@ -285,6 +292,7 @@ def generate_pdf_for_signal(signal_id: str) -> Dict[str, Any]:
             backtest_df=backtest_df,
             headlines=signal_info.get("scored_headlines", [])
         )
+        print(f"[DEBUG] PDF created at {pdf_path}")
 
         try:
             presigned_url = upload_pdf_to_s3(pdf_path)
@@ -300,6 +308,7 @@ def generate_pdf_for_signal(signal_id: str) -> Dict[str, Any]:
         import traceback
         print(traceback.format_exc())
         return {"error": str(e)}
+
 
 
 # # algo/runner.py
