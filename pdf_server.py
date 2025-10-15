@@ -1,10 +1,12 @@
-#pdf-server.py
+#pdf-server.py - updated
 import os
 import time
 import threading
 import traceback
 import sys
 from pathlib import Path
+import boto3
+from botocore.exceptions import ClientError
 
 # ============================================================
 # ✅ ENV LOADER
@@ -159,6 +161,23 @@ def pdf_worker_loop():
 # ============================================================
 # ✅ API: Request PDF for specific user's signal
 # ============================================================
+def generate_presigned_url(bucket_name, object_key, expiration=3600):
+    """Generate a fresh presigned URL for S3 object"""
+    s3_client = boto3.client('s3')
+    try:
+        url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': object_key},
+            ExpiresIn=expiration
+        )
+        return url
+    except ClientError as e:
+        print(f"[ERROR] Failed to generate presigned URL: {e}", flush=True)
+        return None
+
+# ============================================================
+# ✅ API: Request PDF for specific user's signal (FIXED VERSION)
+# ============================================================
 @app.route("/api/user-signals/<user_sub>/<int:signal_id>/request-pdf", methods=["POST", "OPTIONS"])
 def request_pdf_for_user_signal(user_sub, signal_id):
     """Initiate PDF generation for a specific user's signal"""
@@ -191,6 +210,7 @@ def request_pdf_for_user_signal(user_sub, signal_id):
             
             session.close()
             return jsonify({
+                "status": "initiated",
                 "message": "PDF generation initiated",
                 "signal_id": signal_id,
                 "estimated_time_minutes": 15
@@ -198,19 +218,46 @@ def request_pdf_for_user_signal(user_sub, signal_id):
         
         user_signal_id, pdf_status, pdf_url = user_signal[0], user_signal[1], user_signal[2]
         
-        # If already generated, return URL
+        # ✅ If already generated, return FRESH presigned URL
         if pdf_status == 'generated' and pdf_url:
-            print(f"[INFO] PDF already exists: {pdf_url}", flush=True)
-            session.close()
-            return jsonify({
-                "message": "PDF already generated",
-                "pdf_url": pdf_url
-            }), 200
+            print(f"[INFO] PDF already exists in DB: {pdf_url}", flush=True)
+            
+            # Extract S3 object key from stored URL
+            s3_object_key = None
+            
+            # Try parsing format: https://bucket.s3.region.amazonaws.com/key
+            if ".s3." in pdf_url and ".amazonaws.com/" in pdf_url:
+                s3_object_key = pdf_url.split(".amazonaws.com/", 1)[1]
+                # Remove query parameters if present
+                if "?" in s3_object_key:
+                    s3_object_key = s3_object_key.split("?")[0]
+            
+            if s3_object_key:
+                print(f"[INFO] 🔄 Generating fresh presigned URL for: {s3_object_key}", flush=True)
+                fresh_url = generate_presigned_url(
+                    'tradingsignals-pdfs', 
+                    s3_object_key, 
+                    expiration=3600  # 1 hour validity
+                )
+                
+                if fresh_url:
+                    print(f"[SUCCESS] ✅ Fresh presigned URL generated", flush=True)
+                    session.close()
+                    return jsonify({
+                        "status": "generated",
+                        "message": "PDF already exists, fresh URL generated",
+                        "pdf_url": fresh_url
+                    }), 200
+                else:
+                    print(f"[WARN] Failed to generate presigned URL, will re-initiate", flush=True)
+            else:
+                print(f"[WARN] Could not parse S3 key from URL: {pdf_url}", flush=True)
         
-        # Set to 'initiated'
+        # If we reach here: PDF not generated OR failed to get fresh URL
+        # Set to 'initiated' to trigger regeneration
         session.execute(text("""
             UPDATE user_signals
-            SET pdf_status = 'initiated'
+            SET pdf_status = 'initiated', pdf_url = NULL
             WHERE id = :user_signal_id
         """), {"user_signal_id": user_signal_id})
         session.commit()
@@ -220,16 +267,16 @@ def request_pdf_for_user_signal(user_sub, signal_id):
         session.close()
         
         return jsonify({
+            "status": "initiated",
             "message": "PDF generation initiated",
             "signal_id": signal_id,
             "estimated_time_minutes": 15
         }), 202
         
     except Exception as e:
-        print(f"[ERROR] Failed to initiate PDF: {e}", flush=True)
+        print(f"[ERROR] Failed to process PDF request: {e}", flush=True)
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
 
 # ============================================================
 # ✅ HEALTH CHECK
