@@ -495,7 +495,7 @@ def generate_presigned_url(bucket_name, object_key, expiration=3600):
 def request_pdf(user_signal_id):
     """
     Mark pdf_status as 'initiated' for a specific UserSignal.
-    The PDF worker running every minute will pick it up and generate the PDF.
+    If PDF already exists, generate and return a fresh presigned URL.
     """
     try:
         with get_session_context() as session:
@@ -506,30 +506,62 @@ def request_pdf(user_signal_id):
             # If already generated, return a fresh presigned URL
             if user_signal.pdf_status == "generated" and user_signal.pdf_url:
                 # Extract S3 object key from the stored URL
-                s3_url_parts = user_signal.pdf_url.split(".com/")  # "https://bucket.s3.amazonaws.com/pdfs/filename.pdf"
-                if len(s3_url_parts) == 2:
-                    s3_object_key = s3_url_parts[1]
-                    fresh_url = generate_presigned_url('tradingsignals-pdfs', s3_object_key, expiration=3600)
+                # Expected format: "https://bucket-name.s3.region.amazonaws.com/path/to/file.pdf"
+                # or: "https://s3.region.amazonaws.com/bucket-name/path/to/file.pdf"
+                
+                s3_object_key = None
+                
+                # Try parsing format: https://bucket.s3.region.amazonaws.com/key
+                if ".s3." in user_signal.pdf_url and ".amazonaws.com/" in user_signal.pdf_url:
+                    s3_object_key = user_signal.pdf_url.split(".amazonaws.com/", 1)[1]
+                # Try parsing format: https://s3.region.amazonaws.com/bucket/key
+                elif "s3." in user_signal.pdf_url and ".amazonaws.com/" in user_signal.pdf_url:
+                    parts = user_signal.pdf_url.split(".amazonaws.com/", 1)
+                    if len(parts) == 2:
+                        # Skip bucket name, get key
+                        key_parts = parts[1].split("/", 1)
+                        if len(key_parts) == 2:
+                            s3_object_key = key_parts[1]
+                
+                if s3_object_key:
+                    print(f"Generating fresh presigned URL for: {s3_object_key}")
+                    fresh_url = generate_presigned_url(
+                        'tradingsignals-pdfs', 
+                        s3_object_key, 
+                        expiration=3600  # 1 hour validity
+                    )
+                    
                     if fresh_url:
                         return jsonify({
-                            "message": "PDF already generated",
+                            "status": "generated",
+                            "message": "PDF already exists, fresh URL generated",
                             "pdf_url": fresh_url
-                        })
-                # fallback if presigned URL generation fails
-                return jsonify({
-                    "message": "PDF already generated",
-                    "pdf_url": user_signal.pdf_url
-                })
+                        }), 200
+                    else:
+                        print(f"Failed to generate presigned URL for {s3_object_key}")
+                        # Fall through to re-initiate generation
+                else:
+                    print(f"Could not parse S3 key from URL: {user_signal.pdf_url}")
+                    # Fall through to re-initiate generation
 
-            # Initiate PDF generation for new files
+            # If we reach here, either:
+            # 1. PDF was never generated, OR
+            # 2. PDF status is not "generated", OR
+            # 3. Failed to generate fresh presigned URL
+            # Solution: Initiate (or re-initiate) PDF generation
+            
             user_signal.pdf_status = "initiated"
             user_signal.pdf_url = None
             session.add(user_signal)
 
-        return jsonify({"message": "PDF generation initiated"}), 202
+        return jsonify({
+            "status": "initiated",
+            "message": "PDF generation initiated"
+        }), 202
 
     except Exception as e:
-        print(f"Error initiating PDF: {e}")
+        print(f"Error in request_pdf: {e}")
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 @application.route("/api/user-signals/<int:user_signal_id>/pdf-status", methods=["GET"])
