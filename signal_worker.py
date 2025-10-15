@@ -31,7 +31,7 @@ except Exception as e:
     print(traceback.format_exc())
     raise  # fail fast
 
-DEFAULT_TIMEFRAME = "15m"
+DEFAULT_TIMEFRAME = "30m"
 
 # ---------------- Retry Helper ----------------
 def with_retries(func, max_retries=3, delay=5, *args, **kwargs):
@@ -76,9 +76,9 @@ def process_all_coins():
                 # JSON-serializable payload
                 signal_payload = json.loads(json.dumps(signal_data, default=str))
 
-                # Round created_at to nearest 15-minute mark
+                # Round created_at to nearest 30-minute mark
                 now = datetime.utcnow()
-                minute = (now.minute // 15) * 15
+                minute = (now.minute // 30) * 30
                 created_at = now.replace(minute=minute, second=0, microsecond=0)
 
                 # Check if signal already exists

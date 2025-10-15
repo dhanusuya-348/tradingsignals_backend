@@ -51,7 +51,7 @@ def get_timeframes_for_symbol(symbol: str):
     s = (symbol or "").upper()
     if s.startswith("BTC") or s.startswith("ETH"):
         return "30m", "1h", "4h"
-    return "5m", "15m", "1h"
+    return "15m", "30m", "1h"
 
 # -------------------- Live Signal --------------------
 def generate_live_signal_api(symbol: str) -> Dict[str, Any]:

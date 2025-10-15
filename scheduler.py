@@ -31,13 +31,13 @@ def run_worker():
 def wait_until_next_cycle():
     now = datetime.utcnow()
     # Next 15-min mark
-    next_cycle_minute = (now.minute // 15 + 1) * 15
+    next_cycle_minute = (now.minute // 30 + 1) * 30
     if next_cycle_minute == 60:
         next_cycle = now.replace(hour=now.hour + 1, minute=0, second=0, microsecond=0)
     else:
         next_cycle = now.replace(minute=next_cycle_minute, second=0, microsecond=0)
     delta = (next_cycle - now).total_seconds()
-    log(f"Sleeping {int(delta)} seconds until next 15-minute cycle ({next_cycle})...")
+    log(f"Sleeping {int(delta)} seconds until next 30-minute cycle ({next_cycle})...")
     time.sleep(delta)
 
 def shutdown_handler(signum, frame):
@@ -49,7 +49,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, shutdown_handler)
     signal.signal(signal.SIGINT, shutdown_handler)
 
-    log("Scheduler started. Will trigger signal_worker.py every 15 minutes at exact UTC marks.")
+    log("Scheduler started. Will trigger signal_worker.py every 30 minutes at exact UTC marks.")
     try:
         while True:
             run_worker()
