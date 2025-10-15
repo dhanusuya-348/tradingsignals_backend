@@ -8,6 +8,8 @@ import traceback
 import os
 import threading
 from algo.runner import generate_pdf_report_full
+import boto3
+from botocore.exceptions import ClientError
 
 application = Flask(__name__)
 
@@ -476,6 +478,19 @@ def get_user_returns(user_sub):
     except Exception as e:
         return {"error": str(e)}, 500
 
+def generate_presigned_url(bucket_name, object_key, expiration=3600):
+    s3_client = boto3.client('s3')
+    try:
+        url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': object_key},
+            ExpiresIn=expiration
+        )
+        return url
+    except ClientError as e:
+        print(f"Error generating presigned URL: {e}")
+        return None
+
 @application.route("/api/user-signals/<int:user_signal_id>/request-pdf", methods=["POST"])
 def request_pdf(user_signal_id):
     """
@@ -488,14 +503,25 @@ def request_pdf(user_signal_id):
             if not user_signal:
                 return jsonify({"error": "UserSignal not found"}), 404
 
-            # If already generated, return the existing URL
-            if user_signal.pdf_status == "generated":
+            # If already generated, return a fresh presigned URL
+            if user_signal.pdf_status == "generated" and user_signal.pdf_url:
+                # Extract S3 object key from the stored URL
+                s3_url_parts = user_signal.pdf_url.split(".com/")  # "https://bucket.s3.amazonaws.com/pdfs/filename.pdf"
+                if len(s3_url_parts) == 2:
+                    s3_object_key = s3_url_parts[1]
+                    fresh_url = generate_presigned_url('tradingsignals-pdfs', s3_object_key, expiration=3600)
+                    if fresh_url:
+                        return jsonify({
+                            "message": "PDF already generated",
+                            "pdf_url": fresh_url
+                        })
+                # fallback if presigned URL generation fails
                 return jsonify({
                     "message": "PDF already generated",
                     "pdf_url": user_signal.pdf_url
                 })
 
-            # Initiate PDF generation
+            # Initiate PDF generation for new files
             user_signal.pdf_status = "initiated"
             user_signal.pdf_url = None
             session.add(user_signal)
