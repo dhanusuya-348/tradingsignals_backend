@@ -250,6 +250,9 @@ def get_user_subscription():
 # =====================
 # REGISTER ROUTES
 # =====================
+# =====================
+# REGISTER ROUTES
+# =====================
 def register_subscription_routes(app):
     """
     Call this in your application.py:
@@ -257,16 +260,23 @@ def register_subscription_routes(app):
     register_subscription_routes(application)
     """
     
-    @app.route("/api/create-checkout-session", methods=["POST"])
+    @app.route("/api/create-checkout-session", methods=["POST", "OPTIONS"])
     def create_checkout():
+        if request.method == "OPTIONS":
+            # Return 200 with empty body for preflight
+            return "", 200
         return create_checkout_session()
     
-    @app.route("/webhook/stripe", methods=["POST"])
+    @app.route("/webhook/stripe", methods=["POST", "OPTIONS"])
     def stripe_webhook():
+        if request.method == "OPTIONS":
+            return "", 200
         return handle_stripe_webhook()
     
-    @app.route("/api/subscription/<user_sub>", methods=["GET"])
-    def get_subscription():
+    @app.route("/api/subscription/<user_sub>", methods=["GET", "OPTIONS"])
+    def get_subscription(user_sub):
+        if request.method == "OPTIONS":
+            return "", 200
         return get_user_subscription()
     
     print("[INIT] ✅ Stripe subscription routes registered")

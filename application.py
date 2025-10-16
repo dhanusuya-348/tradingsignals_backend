@@ -625,7 +625,14 @@ def cancel_subscription():
     except Exception as e:
         return {"error": str(e)}, 500
     
+# After this line:
 register_subscription_routes(application)
+
+# Add this debug code:
+print("\n=== REGISTERED ROUTES ===")
+for rule in application.url_map.iter_rules():
+    print(f"{rule.endpoint}: {rule.rule} -> {list(rule.methods)}")
+print("========================\n")
 
 if __name__ == "__main__":
     application.run(host="0.0.0.0", port=5000)
