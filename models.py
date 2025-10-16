@@ -72,20 +72,29 @@ class UserSignal(Base):
 
 class User(Base):
     """
-    User profile table to store Cognito user details
+    User profile table to store Cognito user details + Stripe subscription info
     """
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
-    user_sub = Column(String, unique=True, index=True, nullable=False)  # Cognito user ID
-    email = Column(String, unique=True, index=True, nullable=False)     # Email address
-    name = Column(String, nullable=True)                                # Display name
-    phone = Column(String, nullable=True)                               # Phone number for SMS
-    subscription_status = Column(String, default="free", nullable=False) # free/active/cancelled
+    user_sub = Column(String, unique=True, index=True, nullable=False)              # Cognito user ID
+    email = Column(String, unique=True, index=True, nullable=False)                 # Email address
+    name = Column(String, nullable=True)                                            # Display name
+    phone = Column(String, nullable=True)                                           # Phone number for SMS
+    
+    # Subscription fields
+    subscription_status = Column(String, default="free", nullable=False)            # free/active/cancelled
+    subscription_plan = Column(String, default="free", nullable=False)              # free/pro/max
+    stripe_customer_id = Column(String, nullable=True, unique=True)                 # Stripe customer ID
+    stripe_subscription_id = Column(String, nullable=True)                          # Stripe subscription ID
+    subscription_date = Column(DateTime, nullable=True)                             # When user subscribed
+    
+    # Timestamps
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
 
     def __repr__(self):
-        return f"<User(user_sub={self.user_sub}, email={self.email})>"
+        return (f"<User(user_sub={self.user_sub}, email={self.email}, "
+                f"plan={self.subscription_plan}, status={self.subscription_status})>")
 
 # ==========================
 # DATABASE ENGINE & SESSIONS
