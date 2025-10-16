@@ -19,6 +19,7 @@ CORS(application, resources={
     r"/*": {
         "origins": [
             "https://main.d2lu8gx2f335fg.amplifyapp.com",
+            "https://dpz6hfs65cjkw.cloudfront.net",
             "http://localhost:3000"
         ],
         "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
