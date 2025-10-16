@@ -257,26 +257,13 @@ def register_subscription_routes(app):
     register_subscription_routes(application)
     """
     
-    @app.route("/api/create-checkout-session", methods=["POST", "OPTIONS"])
+    @app.route("/api/create-checkout-session", methods=["POST"])
     def create_checkout():
-        # Handle CORS preflight
-        if request.method == "OPTIONS":
-            response = jsonify({"message": "CORS preflight success"})
-            response.headers.add("Access-Control-Allow-Origin", "https://main.d2lu8gx2f335fg.amplifyapp.com")
-            response.headers.add("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
-            response.headers.add("Access-Control-Max-Age", "3600")
-            return response, 200
-
         return create_checkout_session()
-
     
-    @app.route("/webhook/stripe", methods=["POST", "OPTIONS"])
+    @app.route("/webhook/stripe", methods=["POST"])
     def stripe_webhook():
-        if request.method == "OPTIONS":
-            return jsonify({"message": "CORS preflight success"}), 200
         return handle_stripe_webhook()
-
     
     @app.route("/api/subscription/<user_sub>", methods=["GET"])
     def get_subscription():
