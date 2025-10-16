@@ -57,12 +57,39 @@ def format_signal_email(signal_data):
 
     def format_datetime(date_str):
         """Format datetime string to 'DD MMM, YYYY HH:MM:SS UTC' format"""
-        if date_str == "-" or date_str is None:
+        if date_str == "-" or date_str is None or date_str == "":
             return "-"
+        
         try:
-            dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-            return dt.strftime("%d %b, %Y %H:%M:%S UTC").upper()
-        except (ValueError, TypeError):
+            # Try multiple datetime formats that might come from API/database
+            formats_to_try = [
+                "%Y-%m-%d %H:%M:%S.%f",        # 2025-09-29 09:35:04.094713 (with microseconds)
+                "%Y-%m-%d %H:%M:%S",           # 2025-10-16 09:00:00
+                "%Y-%m-%dT%H:%M:%S",           # 2025-10-16T09:00:00
+                "%Y-%m-%dT%H:%M:%SZ",          # 2025-10-16T09:00:00Z (ISO format)
+                "%Y-%m-%dT%H:%M:%S.%f",        # 2025-10-16T09:00:00.000000
+                "%Y-%m-%dT%H:%M:%S.%fZ",       # 2025-10-16T09:00:00.000000Z
+            ]
+            
+            dt = None
+            for fmt in formats_to_try:
+                try:
+                    dt = datetime.strptime(date_str.strip().replace('Z', ''), fmt.replace('Z', ''))
+                    break
+                except ValueError:
+                    continue
+            
+            if dt is None:
+                print(f"[DEBUG] Could not parse datetime with any format: {date_str}")
+                return str(date_str)
+            
+            # Format to desired output: 16 OCT, 2025 09:00:00 UTC
+            formatted = dt.strftime("%d %b, %Y %H:%M:%S UTC").upper()
+            print(f"[DEBUG] Successfully formatted: {date_str} -> {formatted}")
+            return formatted
+            
+        except (ValueError, TypeError, AttributeError) as e:
+            print(f"[DEBUG] Error parsing datetime '{date_str}': {e}")
             return str(date_str)
 
     # Pick colors
@@ -176,34 +203,46 @@ def send_email(to_email, subject, body_text=None, body_html=None):
 
 # Quick local test
 if __name__ == "__main__":
-    # Fake data for preview
+    # Fake data for preview - with various datetime formats to test
     test_signal = {
-        "symbol": "ETH",
+        "symbol": "BNB",
         "interval": "1h",
-        "ltf": "30m",
+        "ltf": "15m",
         "htf": "4h",
         "signal": "BUY",
-        "confidence": 69,
-        "price": 4544.50,  # Added entry price
-        "sentiment": "neutral",
+        "confidence": 62,
+        "price": 1188.19,
+        "sentiment": "bullish",
         "indicators": {
-            "30m": {"macd": "bullish", "rsi_value": 73.6, "rsi_signal": "neutral", "bb": "within_range", "volatility": "medium"},
-            "1h": {"macd": "bullish", "rsi_value": 70.3, "rsi_signal": "neutral", "bb": "within_range", "volatility": "medium"},
-            "4h": {"macd": "bullish", "rsi_value": 74.2, "rsi_signal": "neutral", "bb": "breakout_up", "volatility": "low"},
+            "15m": {"macd": "bullish", "rsi_value": 57.32, "rsi_signal": "neutral", "bb": "within_range", "volatility": "medium"},
+            "1h": {"macd": "bearish", "rsi_value": 52.93, "rsi_signal": "neutral", "bb": "within_range", "volatility": "medium"},
+            "4h": {"macd": "bullish", "rsi_value": 65.5, "rsi_signal": "neutral", "bb": "breakout_up", "volatility": "low"},
         },
         "risk": {
-            "risk_reward_label": "1:2.7",
-            "suggested_stop_loss": 4536.94,
-            "suggested_take_profit": 4792.57,
-            "expected_profit_percent": 4.05,
+            "risk_reward_label": "1:2.84",
+            "suggested_stop_loss": 1177.65,
+            "suggested_take_profit": 1218.11,
+            "expected_profit_percent": 2.52,
             "risk_level": "low"
         },
         "decision": "APPROVED",
-        "timing": {"start": "2025-10-05 08:00:00", "end": "2025-10-05 12:48:00", "duration": "~288 minutes"}
+        "timing": {
+            "start": "2025-09-29 09:35:04.094713",      # Database format with microseconds
+            "end": "2025-09-29 10:05:04.094713",        # Database format with microseconds
+            "duration": "~30 minutes"
+        }
     }
 
+    print("\n" + "="*60)
+    print("TESTING DATETIME FORMATTING")
+    print("="*60)
+    
     html = format_signal_email(test_signal)
-    send_email("dhanurk25@gmail.com", "🚀 ETH Signal Alert - BUY", body_html=html)
+    send_email("dhanurk25@gmail.com", "🚀 BNB Signal Alert - BUY", body_html=html)
+    
+    print("\n" + "="*60)
+    print("EMAIL SENT - CHECK DEBUG LOGS ABOVE")
+    print("="*60)
 
 # #notifications.py
 # import os
