@@ -480,6 +480,43 @@ def get_user_returns(user_sub):
     except Exception as e:
         return {"error": str(e)}, 500
 
+@application.route("/api/signals/all", methods=["GET"])
+def get_all_historical_signals():
+    """Fetch all signals from the signals table (not user-specific) - for homepage"""
+    try:
+        with get_session_context() as session:
+            # Fetch all signals, ordered by newest first
+            signals = session.query(Signal).order_by(
+                Signal.created_at.desc()
+            ).all()
+            
+            result = []
+            for signal in signals:
+                payload = signal.payload or {}
+                
+                result.append({
+                    "id": signal.id,
+                    "symbol": signal.symbol,
+                    "signal": payload.get("signal", "HOLD"),
+                    "confidence": payload.get("confidence", 0),
+                    "price": payload.get("price"),
+                    "timing": payload.get("timing", {}),
+                    "risk": payload.get("risk", {}),
+                    "sentiment": payload.get("sentiment", "Neutral"),
+                    "strategies": payload.get("top_contributing_strategies", []),
+                    "created_at": signal.created_at.isoformat() if signal.created_at else None,
+                })
+            
+            return jsonify({
+                "signals": result,
+                "count": len(result)
+            }), 200
+            
+    except Exception as e:
+        print(f"Error fetching all signals: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Failed to fetch signals"}), 500
+
 def generate_presigned_url(bucket_name, object_key, expiration=3600):
     s3_client = boto3.client('s3')
     try:
