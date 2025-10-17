@@ -130,6 +130,9 @@ def create_checkout_session():
 # =====================
 # WEBHOOK HANDLER
 # =====================
+# =====================
+# WEBHOOK HANDLER
+# =====================
 def handle_stripe_webhook():
     """
     Stripe sends POST to /webhook/stripe with signed events.
@@ -154,15 +157,24 @@ def handle_stripe_webhook():
     try:
         # EVENT 1: Checkout completed (user paid)
         if event["type"] == "checkout.session.completed":
-            session = event["data"]["object"]
-            user_sub = session.get("client_reference_id")
+            session_obj = event["data"]["object"]
+            user_sub = session_obj.get("client_reference_id")
             
-            # Get the price ID from line items
+            print(f"[WEBHOOK] 💳 Checkout completed for user: {user_sub}")
+            
+            # Fetch the full session with line_items expanded
+            session_id = session_obj.get("id")
+            full_session = stripe.checkout.Session.retrieve(
+                session_id,
+                expand=['line_items']
+            )
+            
+            # Now get the price ID from expanded line_items
             price_id = None
-            if session.get("line_items"):
-                price_id = session["line_items"]["data"][0]["price"]["id"]
+            if full_session.line_items and full_session.line_items.data:
+                price_id = full_session.line_items.data[0].price.id
             
-            print(f"[WEBHOOK] 💳 Checkout completed for user: {user_sub}, price: {price_id}")
+            print(f"[WEBHOOK] 💰 Price ID extracted: {price_id}")
             
             if user_sub and price_id:
                 with get_session_context() as db_session:
@@ -172,14 +184,18 @@ def handle_stripe_webhook():
                         
                         user.subscription_status = "active"
                         user.subscription_plan = plan
-                        user.stripe_customer_id = session.get("customer")
-                        user.stripe_subscription_id = session.get("subscription")
+                        user.stripe_customer_id = full_session.customer
+                        user.stripe_subscription_id = full_session.subscription
                         user.subscription_date = datetime.utcnow()
                         user.updated_at = datetime.utcnow()
                         
                         print(f"[WEBHOOK] ✅ User {user_sub} upgraded to plan: {plan}")
+                        print(f"[WEBHOOK] Customer ID: {full_session.customer}")
+                        print(f"[WEBHOOK] Subscription ID: {full_session.subscription}")
                     else:
                         print(f"[WEBHOOK] ⚠️ User not found: {user_sub}")
+            else:
+                print(f"[WEBHOOK] ⚠️ Missing user_sub or price_id: {user_sub}, {price_id}")
         
         # EVENT 2: Subscription renewed/updated
         elif event["type"] == "customer.subscription.updated":
