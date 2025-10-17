@@ -482,13 +482,20 @@ def get_user_returns(user_sub):
 
 @application.route("/api/signals/all", methods=["GET"])
 def get_all_historical_signals():
-    """Fetch all signals from the signals table (not user-specific) - for homepage"""
+    """Fetch all signals from the signals table that are at least 5 hours old"""
     try:
+        from datetime import datetime, timedelta
+        
         with get_session_context() as session:
-            # Fetch all signals, ordered by newest first
-            signals = session.query(Signal).order_by(
+            # Calculate 5 hours ago
+            five_hours_ago = datetime.utcnow() - timedelta(hours=5)
+            
+            # Only fetch signals older than 5 hours
+            signals = session.query(Signal).filter(
+                Signal.created_at <= five_hours_ago
+            ).order_by(
                 Signal.created_at.desc()
-            ).all()
+            ).limit(100).all()
             
             result = []
             for signal in signals:

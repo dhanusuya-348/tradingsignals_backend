@@ -27,7 +27,7 @@ def format_signal_email(signal_data):
     decision = signal_data.get("decision", "N/A")
     timing = signal_data.get("timing", {})
     risk = signal_data.get("risk", {})
-    price = signal_data.get("price", "N/A")  # Get entry price
+    price = signal_data.get("price", "N/A")
 
     ltf = signal_data.get("ltf", "N/A")
     interval = signal_data.get("interval", "N/A")
@@ -92,6 +92,10 @@ def format_signal_email(signal_data):
             print(f"[DEBUG] Error parsing datetime '{date_str}': {e}")
             return str(date_str)
 
+    # Format datetime BEFORE creating HTML string
+    valid_from = format_datetime(timing.get('start', '-'))
+    valid_to = format_datetime(timing.get('end', '-'))
+
     # Pick colors
     color_map = {"BUY": "#2ecc71", "SELL": "#e74c3c", "HOLD": "#f1c40f"}
     signal_color = color_map.get(signal, "#3498db")
@@ -155,8 +159,8 @@ def format_signal_email(signal_data):
 
         <h3 style="color:#444; margin-top:20px;">🕒 Timing</h3>
         <p style="color:#555;">
-          <b>Valid From:</b> {format_datetime(timing.get('start', '-'))}<br>
-          <b>Valid To:</b> {format_datetime(timing.get('end', '-'))}<br>
+          <b>Valid From:</b> {valid_from}<br>
+          <b>Valid To:</b> {valid_to}<br>
           <b>Duration:</b> {timing.get('duration', '-')}
         </p>
 
