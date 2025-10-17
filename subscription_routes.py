@@ -16,7 +16,7 @@ stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://main.d2lu8gx2f335fg.amplifyapp.com")
 
-# Price IDs from Stripe Dashboard
+# Price IDs from Stripe Dashboard - these are the ACTUAL Stripe price IDs
 PRICE_IDS = {
     "cryptolite_monthly": os.environ.get("PRICE_CRYPTOLITE_MONTHLY"),
     "cryptolite_annual": os.environ.get("PRICE_CRYPTOLITE_ANNUAL"),
@@ -26,15 +26,23 @@ PRICE_IDS = {
     "cryptomax_annual": os.environ.get("PRICE_CRYPTOMAX_ANNUAL"),
 }
 
-# Map Stripe Price IDs to your plan names
+# Map ACTUAL Stripe Price IDs to plan names
+# Built dynamically from environment variables to ensure it always matches
 PLAN_MAPPING = {
-    "price_cryptolite_monthly": "free",
-    "price_cryptolite_annual": "free",
-    "price_cryptopro_monthly": "pro",
-    "price_cryptopro_annual": "pro",
-    "price_cryptomax_monthly": "max",
-    "price_cryptomax_annual": "max",
+    os.environ.get("PRICE_CRYPTOLITE_MONTHLY"): "free",
+    os.environ.get("PRICE_CRYPTOLITE_ANNUAL"): "free",
+    os.environ.get("PRICE_CRYPTOPRO_MONTHLY"): "pro",
+    os.environ.get("PRICE_CRYPTOPRO_ANNUAL"): "pro",
+    os.environ.get("PRICE_CRYPTOMAX_MONTHLY"): "max",
+    os.environ.get("PRICE_CRYPTOMAX_ANNUAL"): "max",
 }
+
+# Remove None values (in case env vars aren't set)
+PLAN_MAPPING = {k: v for k, v in PLAN_MAPPING.items() if k is not None}
+
+print(f"[INIT] PLAN_MAPPING configured with {len(PLAN_MAPPING)} price IDs")
+if not PLAN_MAPPING:
+    print("[INIT] ⚠️ WARNING: PLAN_MAPPING is empty! Check your environment variables.")
 
 
 # =====================
@@ -44,10 +52,12 @@ def get_price_id(plan_key):
     """
     Get actual Stripe Price ID from environment variables
     plan_key examples: 'cryptopro_monthly', 'cryptomax_annual'
+    
+    Returns the actual Stripe price ID (e.g., 'price_1SItiWE17vQXMsiHPNpQs75L')
     """
     price_id = PRICE_IDS.get(plan_key)
     if not price_id:
-        raise ValueError(f"Price ID not configured for {plan_key}")
+        raise ValueError(f"Price ID not configured for {plan_key}. Check your environment variables.")
     return price_id
 
 
@@ -130,9 +140,6 @@ def create_checkout_session():
 # =====================
 # WEBHOOK HANDLER
 # =====================
-# =====================
-# WEBHOOK HANDLER
-# =====================
 def handle_stripe_webhook():
     """
     Stripe sends POST to /webhook/stripe with signed events.
@@ -175,12 +182,16 @@ def handle_stripe_webhook():
                 price_id = full_session.line_items.data[0].price.id
             
             print(f"[WEBHOOK] 💰 Price ID extracted: {price_id}")
+            print(f"[WEBHOOK] 📋 Available mappings: {list(PLAN_MAPPING.keys())}")
             
             if user_sub and price_id:
                 with get_session_context() as db_session:
                     user = db_session.query(User).filter_by(user_sub=user_sub).first()
                     if user:
+                        # Get the plan from mapping - NOW WITH CORRECT PRICE IDS
                         plan = PLAN_MAPPING.get(price_id, "free")
+                        
+                        print(f"[WEBHOOK] Plan lookup: {price_id} -> {plan}")
                         
                         user.subscription_status = "active"
                         user.subscription_plan = plan
@@ -266,9 +277,6 @@ def get_user_subscription():
 # =====================
 # REGISTER ROUTES
 # =====================
-# =====================
-# REGISTER ROUTES
-# =====================
 def register_subscription_routes(app):
     """
     Call this in your application.py:
@@ -279,7 +287,6 @@ def register_subscription_routes(app):
     @app.route("/api/create-checkout-session", methods=["POST", "OPTIONS"])
     def create_checkout():
         if request.method == "OPTIONS":
-            # Return 200 with empty body for preflight
             return "", 200
         return create_checkout_session()
     
