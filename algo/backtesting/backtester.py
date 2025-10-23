@@ -226,3 +226,95 @@ def run_backtest(price_df, symbol, interval, headlines, price_data_dict):
     else:
         print("Warning: No valid backtest results generated.")
     return df
+
+def run_instant_backtest(symbol, signal_info):
+    """
+    Runs a mini backtest immediately after a signal is generated.
+    Uses 1-minute data for the estimated duration window.
+    """
+
+    from datetime import timedelta
+    import pandas as pd
+    from ..data.fetch_price import fetch_binance_1m_data
+    from ..logic.risk_manager import calculate_risk_management
+    from ..logic.signal_timer import estimate_signal_duration
+    from .backtester import calculate_trade_result
+
+    signal = signal_info["signal"]
+    confidence = signal_info["confidence"]
+    entry_price = signal_info["price_snapshot"]["close"]
+    volatility = signal_info["indicators"]["volatility"]
+
+    stop_loss = signal_info["risk"]["suggested_stop_loss"]
+    take_profit = signal_info["risk"]["suggested_take_profit"]
+
+    interval = signal_info.get("interval", "1h")
+    entry_time = pd.to_datetime("now", utc=True)
+
+    estimated_duration_minutes = estimate_signal_duration(
+        signal_type=signal,
+        confidence=confidence,
+        trend=signal_info["indicators"]["trend"],
+        sentiment=signal_info["indicators"]["sentiment"],
+        volatility=volatility,
+        timeframe=interval
+    )
+
+    # Fetch minute data for duration window
+    end_time = entry_time + timedelta(minutes=estimated_duration_minutes)
+    minute_data = fetch_binance_1m_data(symbol, entry_time, end_time)
+
+    exit_price = None
+    exit_time = None
+    exit_reason = "TIME"
+
+    for t, row in minute_data.iterrows():
+        if signal == "BUY":
+            if row["low"] <= stop_loss:
+                exit_price = stop_loss
+                exit_reason = "SL"
+                exit_time = t
+                break
+            elif row["high"] >= take_profit:
+                exit_price = take_profit
+                exit_reason = "TP"
+                exit_time = t
+                break
+        else:  # SELL
+            if row["high"] >= stop_loss:
+                exit_price = stop_loss
+                exit_reason = "SL"
+                exit_time = t
+                break
+            elif row["low"] <= take_profit:
+                exit_price = take_profit
+                exit_reason = "TP"
+                exit_time = t
+                break
+
+    if exit_price is None:
+        exit_price = minute_data.iloc[-1]["close"]
+        exit_time = minute_data.index[-1]
+        exit_reason = "TIME"
+
+    # Calculate result
+    net_return_percent, result, net_profit = calculate_trade_result(
+        signal, entry_price, exit_price, exit_reason
+    )
+
+    duration = int((exit_time - entry_time).total_seconds() / 60)
+
+    return {
+        "symbol": symbol,
+        "signal": signal,
+        "confidence": confidence,
+        "entry_price": entry_price,
+        "exit_price": exit_price,
+        "exit_reason": exit_reason,
+        "duration_minutes": duration,
+        "return_percent": net_return_percent,
+        "profit_usd": net_profit,
+        "result": result,
+        "entry_time": entry_time,
+        "exit_time": exit_time
+    }

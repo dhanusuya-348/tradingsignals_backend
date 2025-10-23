@@ -69,6 +69,31 @@ class UserSignal(Base):
     def __repr__(self):
         return (f"<UserSignal(user_sub={self.user_sub}, signal_id={self.signal_id}, "
                 f"delivery_status={self.delivery_status}, pdf_status={self.pdf_status})>")
+    
+class SignalPerformance(Base):
+    """
+    Stores live performance results of a signal after monitoring.
+    """
+    __tablename__ = "signal_performances"
+    id = Column(Integer, primary_key=True)
+    signal_id = Column(Integer, ForeignKey("signals.id"), nullable=False)
+    
+    # Signal performance
+    exit_price = Column(String, nullable=True)
+    exit_reason = Column(String, nullable=True)        # TP / SL / TIME
+    result = Column(String, nullable=True)            # SUCCESS / FAILURE
+    return_percent = Column(String, nullable=True)    # % return
+    profit_usd = Column(String, nullable=True)
+    duration_minutes = Column(Integer, nullable=True)
+    tracked_at = Column(DateTime, nullable=False)
+
+    # Relationship back to Signal
+    signal = relationship("Signal", backref="performances")
+
+    def __repr__(self):
+        return (f"<SignalPerformance(signal_id={self.signal_id}, exit_reason={self.exit_reason}, "
+                f"result={self.result}, return={self.return_percent}%)>")
+
 
 class User(Base):
     """

@@ -148,6 +148,27 @@ def process_all_coins():
                     session.commit()
                     print(f"[{datetime.utcnow()}] Signal {symbol} at {created_at} marked as processed")
 
+                # ---- Live performance tracker trigger ----
+                try:
+                    from algo.backtesting.live_tracker import monitor_live_signal
+                    # Include DB signal id in payload so tracker can save results
+                    signal_payload_with_id = dict(signal_payload)
+                    signal_payload_with_id["id"] = signal.id
+
+                    # Start monitoring in background (non-blocking)
+                    import threading
+                    threading.Thread(
+                        target=monitor_live_signal,
+                        args=(symbol, signal_payload_with_id),
+                        daemon=True
+                    ).start()
+
+                    print(f"[{datetime.utcnow()}] ✅ Live performance tracking started for {symbol}")
+                except Exception as e:
+                    print(f"[{datetime.utcnow()}] ⚠ Performance tracking failed for {symbol}: {e}")
+
+
+
             except Exception as e:
                 print(f"[{datetime.utcnow()}] Error processing {symbol}: {e}")
                 print(traceback.format_exc())
