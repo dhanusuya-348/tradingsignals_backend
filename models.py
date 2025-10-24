@@ -74,7 +74,7 @@ class SignalPerformance(Base):
     """
     Stores live performance results of a signal after monitoring.
     """
-    __tablename__ = "signal_performances"
+    __tablename__ = "signal_performance"
     id = Column(Integer, primary_key=True)
     signal_id = Column(Integer, ForeignKey("signals.id"), nullable=False)
     

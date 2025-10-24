@@ -1,5 +1,15 @@
 import time
+import os
 from datetime import datetime, timedelta
+
+# Load .env variables for local testing
+try:
+    from load_env import load_env_file
+    load_env_file()
+    print(f"[{datetime.utcnow()}] ✅ Loaded .env variables")
+except ImportError:
+    print(f"[{datetime.utcnow()}] ⚠ load_env.py not found, using system environment variables")
+
 from ..data.fetch_price import fetch_binance_1m_data
 from ..backtesting.backtester import calculate_trade_result
 
@@ -10,8 +20,13 @@ def monitor_live_signal(symbol, signal_info, update_callback=None):
     from ..data.fetch_price import fetch_binance_1m_data
     from ..backtesting.backtester import calculate_trade_result
 
+    # Ensure symbol does not double append USDT
+    symbol = symbol.upper()
+    if symbol.endswith("USDT"):
+        symbol = symbol[:-4]
+
     signal = signal_info["signal"]
-    entry_price = signal_info["price_snapshot"]["close"]
+    entry_price = signal_info.get("price") or signal_info.get("price_snapshot", {}).get("close")
     stop_loss = signal_info["risk"]["suggested_stop_loss"]
     take_profit = signal_info["risk"]["suggested_take_profit"]
     confidence = signal_info["confidence"]
@@ -29,7 +44,14 @@ def monitor_live_signal(symbol, signal_info, update_callback=None):
 
     while datetime.utcnow() < end_time:
         try:
-            df = fetch_binance_1m_data(symbol)
+            # Fetch only the last 2 minutes of 1m data
+            df = fetch_binance_1m_data(symbol, datetime.utcnow() - timedelta(minutes=2), datetime.utcnow())
+            
+            if df.empty:
+                print(f"[WARN] No recent 1m data for {symbol}, retrying in 60s...")
+                time.sleep(60)
+                continue
+
             current_price = df.iloc[-1]["close"]
 
             if signal == "BUY":
@@ -55,7 +77,7 @@ def monitor_live_signal(symbol, signal_info, update_callback=None):
                     exit_time = datetime.utcnow()
                     break
 
-            time.sleep(60)  # check again after 1 minute
+            time.sleep(60)  # wait 1 minute before next check
 
         except Exception as e:
             print(f"[ERROR] Live tracker failed for {symbol}: {e}")
