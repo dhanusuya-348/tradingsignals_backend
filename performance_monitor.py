@@ -48,6 +48,12 @@ def add_new_signals():
                     print(f"[INFO] Found {len(new_signals)} new signal(s) to track")
 
                 for sig in new_signals:
+                    # Sanity check: ensure signal exists in DB
+                    db_sig = session.query(Signal).filter_by(id=sig.id).first()
+                    if not db_sig:
+                        print(f"[WARN] Signal ID {sig.id} not found in signals table, skipping")
+                        continue
+
                     # Check if already in SignalPerformance
                     exists = session.query(SignalPerformance).filter_by(signal_id=sig.id).first()
                     if exists:
@@ -56,7 +62,7 @@ def add_new_signals():
 
                     # Add to SignalPerformance with status RUNNING
                     perf = SignalPerformance(
-                        signal_id=sig.id,
+                        signal_id=sig.id,  # ✅ Always use DB ID
                         status="RUNNING",
                         tracked_at=datetime.utcnow()
                     )
