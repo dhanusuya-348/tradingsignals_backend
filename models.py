@@ -75,14 +75,18 @@ class SignalPerformance(Base):
     Stores live performance results of a signal after monitoring.
     """
     __tablename__ = "signal_performance"
+
     id = Column(Integer, primary_key=True)
     signal_id = Column(Integer, ForeignKey("signals.id"), nullable=False)
-    
-    # Signal performance
+
+    # Status of performance tracking
+    status = Column(String, default="PENDING")  # PENDING / COMPLETED
+
+    # Signal performance details
     exit_price = Column(String, nullable=True)
     exit_reason = Column(String, nullable=True)        # TP / SL / TIME
-    result = Column(String, nullable=True)            # SUCCESS / FAILURE
-    return_percent = Column(String, nullable=True)    # % return
+    result = Column(String, nullable=True)             # SUCCESS / FAILURE
+    return_percent = Column(String, nullable=True)     # % return
     profit_usd = Column(String, nullable=True)
     duration_minutes = Column(Integer, nullable=True)
     tracked_at = Column(DateTime, nullable=False)
@@ -91,8 +95,8 @@ class SignalPerformance(Base):
     signal = relationship("Signal", backref="performances")
 
     def __repr__(self):
-        return (f"<SignalPerformance(signal_id={self.signal_id}, exit_reason={self.exit_reason}, "
-                f"result={self.result}, return={self.return_percent}%)>")
+        return (f"<SignalPerformance(signal_id={self.signal_id}, status={self.status}, "
+                f"exit_reason={self.exit_reason}, result={self.result}, return={self.return_percent}%)>")
 
 
 class User(Base):
