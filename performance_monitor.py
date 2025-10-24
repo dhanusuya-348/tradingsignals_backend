@@ -1,9 +1,6 @@
-# performance_monitor.py
-import sys
-import os
-import time
+import sys, os, time, traceback
 from datetime import datetime
-import traceback
+from threading import Thread
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -13,57 +10,57 @@ try:
 except ImportError:
     pass
 
-from models import get_session_context, Signal
+from models import get_session_context, Signal, SignalPerformance
 from algo.backtesting.live_tracker import monitor_live_signal
 
 def log(msg: str):
-    """Print log messages with UTC timestamp."""
     print(f"[{datetime.utcnow()}] {msg}", flush=True)
 
+def monitor_signal_thread(signal_id, symbol, signal_info):
+    """Run monitor_live_signal in a separate thread."""
+    try:
+        monitor_live_signal(symbol, signal_info)
+        log(f"✅ Monitoring completed for Signal {signal_id}")
+    except Exception as e:
+        log(f"❌ Monitoring failed for Signal {signal_id}: {e}")
+        traceback.print_exc()
+
 def monitor_pending_signals():
-    """
-    24/7 daemon that picks up signals with processed=False
-    and monitors them one at a time.
-    """
     log("Performance Monitor started. Listening for pending signals...")
-    
+
+    active_threads = {}
+
     while True:
         try:
             with get_session_context() as session:
-                # Find ONE signal that needs monitoring
-                pending_signal = session.query(Signal).filter_by(
-                    processed=False
-                ).order_by(Signal.created_at.desc()).first()
-                
-                if not pending_signal:
-                    # No pending signals, sleep and check again
-                    time.sleep(30)  # Check every 30 seconds
-                    continue
-                
-                log(f"📊 Starting monitoring for Signal {pending_signal.id} ({pending_signal.symbol})")
-                
-                # Extract signal info from payload
-                signal_info = pending_signal.payload.copy() if pending_signal.payload else {}
-                signal_info["id"] = pending_signal.id
-                signal_info["symbol"] = pending_signal.symbol
-                
-                try:
-                    # Run the monitoring (blocks until done - could be 3 hours!)
-                    monitor_live_signal(
-                        pending_signal.symbol, 
-                        signal_info
-                    )
-                    
-                    log(f"✅ Monitoring completed for Signal {pending_signal.id}")
-                    
-                except Exception as monitor_err:
-                    log(f"❌ Monitoring failed for Signal {pending_signal.id}: {monitor_err}")
-                    traceback.print_exc()
-                
+                pending_signals = session.query(Signal).outerjoin(SignalPerformance).filter(SignalPerformance.id == None).all()
+
+                for sig in pending_signals:
+                    if sig.id in active_threads and active_threads[sig.id].is_alive():
+                        # Already monitoring this signal
+                        continue
+
+                    signal_info = sig.payload.copy() if sig.payload else {}
+                    signal_info["id"] = sig.id
+                    signal_info["symbol"] = sig.symbol
+
+                    # Start a new thread for this signal
+                    thread = Thread(target=monitor_signal_thread, args=(sig.id, sig.symbol, signal_info))
+                    thread.start()
+                    active_threads[sig.id] = thread
+                    log(f"📊 Started monitoring for Signal {sig.id} ({sig.symbol}) in a new thread")
+
+            # Cleanup finished threads
+            to_remove = [k for k, t in active_threads.items() if not t.is_alive()]
+            for k in to_remove:
+                del active_threads[k]
+
+            time.sleep(30)  # Check every 30 seconds
+
         except Exception as e:
             log(f"⚠️ Error in monitoring loop: {e}")
             traceback.print_exc()
-            time.sleep(60)  # Wait before retrying
+            time.sleep(60)
 
 if __name__ == "__main__":
     monitor_pending_signals()

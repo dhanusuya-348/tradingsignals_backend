@@ -15,28 +15,54 @@ from ..backtesting.backtester import calculate_trade_result
 
 def monitor_live_signal(symbol, signal_info, update_callback=None):
     from models import get_session_context, SignalPerformance
-    import time
-    from datetime import datetime, timedelta
-    from ..data.fetch_price import fetch_binance_1m_data
-    from ..backtesting.backtester import calculate_trade_result
 
     # Ensure symbol does not double append USDT
     symbol = symbol.upper()
     if symbol.endswith("USDT"):
         symbol = symbol[:-4]
 
-    signal = signal_info["signal"]
+    signal = signal_info.get("signal", "HOLD")
     entry_price = signal_info.get("price") or signal_info.get("price_snapshot", {}).get("close")
-    stop_loss = signal_info["risk"]["suggested_stop_loss"]
-    take_profit = signal_info["risk"]["suggested_take_profit"]
-    confidence = signal_info["confidence"]
+    
+    risk_info = signal_info.get("risk", {})
+    stop_loss = risk_info.get("suggested_stop_loss", 0.0)
+    take_profit = risk_info.get("suggested_take_profit", 0.0)
+    confidence = signal_info.get("confidence", 0)
     interval = signal_info.get("interval", "1h")
-    estimated_duration = signal_info["risk"]["estimated_duration_minutes"]
+
+    # --- FIXED: Get duration safely ---
+    timing_info = signal_info.get("timing", {})
+    estimated_duration = 60  # default duration
+
+    # Try to parse "~195 minutes" from timing
+    if "duration" in timing_info and isinstance(timing_info["duration"], str):
+        duration_str = timing_info["duration"].replace("~", "").replace("minutes", "").strip()
+        try:
+            estimated_duration = int(float(duration_str))
+        except Exception:
+            pass
+    # Fallback to risk object
+    elif "estimated_duration_minutes" in risk_info:
+        try:
+            estimated_duration = int(risk_info["estimated_duration_minutes"])
+        except Exception:
+            pass
+
+    # Skip if signal is HOLD or rejected
+    if signal == "HOLD" or signal_info.get("decision") == "REJECTED":
+        print(f"⏭️ [LIVE TRACKER] Skipping {symbol} - Signal is {signal} or decision is REJECTED")
+        return None
+
+    # Skip if missing critical data
+    if not entry_price or not stop_loss or not take_profit:
+        print(f"⚠️ [LIVE TRACKER] Skipping {symbol} - Missing entry_price, stop_loss, or take_profit")
+        print(f"   Entry: {entry_price}, SL: {stop_loss}, TP: {take_profit}")
+        return None
 
     start_time = datetime.utcnow()
     end_time = start_time + timedelta(minutes=estimated_duration)
 
-    print(f"📈 [LIVE TRACKER] {symbol} {signal} started at {start_time}, watching until {end_time}")
+    print(f"📈 [LIVE TRACKER] {symbol} {signal} started at {start_time}, watching for {estimated_duration}m until {end_time}")
 
     exit_reason = "TIME"
     exit_price = entry_price
@@ -59,22 +85,26 @@ def monitor_live_signal(symbol, signal_info, update_callback=None):
                     exit_reason = "SL"
                     exit_price = stop_loss
                     exit_time = datetime.utcnow()
+                    print(f"🛑 [LIVE TRACKER] {symbol} hit SL at {exit_price}")
                     break
                 elif current_price >= take_profit:
                     exit_reason = "TP"
                     exit_price = take_profit
                     exit_time = datetime.utcnow()
+                    print(f"✨ [LIVE TRACKER] {symbol} hit TP at {exit_price}")
                     break
             else:  # SELL
                 if current_price >= stop_loss:
                     exit_reason = "SL"
                     exit_price = stop_loss
                     exit_time = datetime.utcnow()
+                    print(f"🛑 [LIVE TRACKER] {symbol} hit SL at {exit_price}")
                     break
                 elif current_price <= take_profit:
                     exit_reason = "TP"
                     exit_price = take_profit
                     exit_time = datetime.utcnow()
+                    print(f"✨ [LIVE TRACKER] {symbol} hit TP at {exit_price}")
                     break
 
             time.sleep(60)  # wait 1 minute before next check
@@ -115,7 +145,7 @@ def monitor_live_signal(symbol, signal_info, update_callback=None):
     try:
         with get_session_context() as session:
             perf = SignalPerformance(
-                signal_id=signal_info["id"],  # make sure signal_info has DB id
+                signal_id=signal_info.get("id"),
                 exit_price=str(exit_price),
                 exit_reason=exit_reason,
                 result=result,
