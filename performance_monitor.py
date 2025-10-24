@@ -6,7 +6,7 @@ from threading import Thread
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from models import get_session_context, Signal, SignalPerformance
-from algo.backtesting.live_tracker import evaluate_signal_performance
+from algo.backtesting.live_tracker import monitor_live_signal
 
 def log(msg: str):
     print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
@@ -14,7 +14,7 @@ def log(msg: str):
 def process_signal_thread(sig):
     """Runs performance check for a completed signal."""
     try:
-        evaluate_signal_performance(sig.symbol, sig.payload)
+        monitor_live_signal(sig.symbol, sig.payload)
         log(f"✅ Completed performance evaluation for Signal {sig.id}")
     except Exception as e:
         log(f"❌ Error evaluating Signal {sig.id}: {e}")
