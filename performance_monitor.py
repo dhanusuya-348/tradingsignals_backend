@@ -1,81 +1,80 @@
-#performance_monitor.py
-import sys, os, time, traceback
+import time
 from datetime import datetime
 from threading import Thread
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Load .env variables for local testing
+try:
+    from load_env import load_env_file
+    load_env_file()
+    print(f"[{datetime.utcnow()}] ✅ Loaded .env variables")
+except ImportError:
+    print(f"[{datetime.utcnow()}] ⚠ load_env.py not found, using system environment variables")
 
 from models import get_session_context, Signal, SignalPerformance
 from algo.backtesting.live_tracker import monitor_live_signal
 
-def log(msg: str):
-    print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
+# --- CONFIG ---
+START_DATE = datetime(2025, 10, 23)  # Only consider signals after this date
+CHECK_INTERVAL = 60  # Seconds between checking for new signals
 
-def process_signal_thread(sig):
-    """Runs performance check for a completed signal."""
+def process_signal_thread(signal_obj):
+    """
+    Thread to monitor a single signal in real-time.
+    """
     try:
-        monitor_live_signal(sig.symbol, sig.payload)
-        log(f"✅ Completed performance evaluation for Signal {sig.id}")
+        monitor_live_signal(signal_obj.symbol, signal_obj.payload)
     except Exception as e:
-        log(f"❌ Error evaluating Signal {sig.id}: {e}")
-        traceback.print_exc()
+        print(f"[ERROR] Exception while processing signal {signal_obj.id}: {e}")
 
-def monitor_pending_signals():
-    log("📊 Performance Monitor started (post-signal evaluation mode)...")
-    active_threads = {}
+def add_new_signals():
+    """
+    Continuously monitors signals table and adds new entries to signal_performance
+    for signals whose valid_to is passed and are not already tracked.
+    """
+    last_checked_id = 0
 
     while True:
         try:
-            now = datetime.utcnow()
-
             with get_session_context() as session:
-                # Fetch signals that either:
-                # 1. Have no performance record, OR
-                # 2. Have performance with 'PENDING' status
-                pending_signals = (
-                    session.query(Signal)
-                    .outerjoin(SignalPerformance)
-                    .filter(
-                        (SignalPerformance.id == None) |
-                        (SignalPerformance.status == "PENDING")
-                    )
+                # Fetch signals that are new, valid_to <= now, and after START_DATE
+                new_signals = session.query(Signal)\
+                    .filter(Signal.id > last_checked_id)\
+                    .filter(Signal.valid_to <= datetime.utcnow())\
+                    .filter(Signal.valid_to >= START_DATE)\
+                    .order_by(Signal.id.asc())\
                     .all()
-                )
 
-                for sig in pending_signals:
-                    payload = sig.payload or {}
-                    timing = payload.get("timing", {})
-                    valid_to_str = timing.get("end")
+                if new_signals:
+                    print(f"[INFO] Found {len(new_signals)} new signal(s) to track")
 
-                    if not valid_to_str:
+                for sig in new_signals:
+                    # Check if already in SignalPerformance
+                    exists = session.query(SignalPerformance).filter_by(signal_id=sig.id).first()
+                    if exists:
+                        print(f"[INFO] Signal {sig.id} already in performance table, skipping")
                         continue
 
-                    # Try parsing valid_to safely
-                    try:
-                        valid_to = datetime.strptime(valid_to_str, "%Y-%m-%d %H:%M:%S")
-                    except Exception:
-                        continue
+                    # Add to SignalPerformance with status RUNNING
+                    perf = SignalPerformance(
+                        signal_id=sig.id,
+                        status="RUNNING",
+                        tracked_at=datetime.utcnow()
+                    )
+                    session.add(perf)
+                    session.commit()
+                    print(f"🟢 Signal {sig.id} added to SignalPerformance (ID {perf.id})")
 
-                    # If signal has reached its valid_to time → queue for evaluation
-                    if now >= valid_to:
-                        if sig.id not in active_threads or not active_threads[sig.id].is_alive():
-                            t = Thread(target=process_signal_thread, args=(sig,))
-                            t.daemon = True  # ensures thread closes cleanly with process
-                            t.start()
-                            active_threads[sig.id] = t
-                            log(f"🧩 Queued Signal {sig.id} ({sig.symbol}) for performance evaluation")
+                    # Start monitoring in a new thread
+                    thread = Thread(target=process_signal_thread, args=(sig,))
+                    thread.start()
 
-            # Cleanup finished threads
-            finished = [sid for sid, t in active_threads.items() if not t.is_alive()]
-            for sid in finished:
-                del active_threads[sid]
-
-            time.sleep(60)  # check every 1 minute
+                    last_checked_id = max(last_checked_id, sig.id)
 
         except Exception as e:
-            log(f"⚠️ Monitor error: {e}")
-            traceback.print_exc()
-            time.sleep(60)
+            print(f"[ERROR] Failed to fetch/add new signals: {e}")
+
+        time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
-    monitor_pending_signals()
+    print(f"[{datetime.utcnow()}] 🚀 Starting Performance Monitor...")
+    add_new_signals()
