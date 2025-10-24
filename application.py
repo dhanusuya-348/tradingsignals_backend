@@ -1,6 +1,6 @@
 # application.py
 from flask import Flask, request, jsonify, send_file
-from models import Base, get_engine_from_env, get_session_context, Watchlist, Signal, UserSignal, User
+from models import Base, get_engine_from_env, get_session_context, Watchlist, Signal, UserSignal, User, SignalPerformance
 from datetime import datetime
 from flask_cors import CORS
 from sqlalchemy import desc
@@ -521,6 +521,153 @@ def get_all_historical_signals():
             
     except Exception as e:
         print(f"Error fetching all signals: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Failed to fetch signals"}), 500
+    
+# Add this to your application.py file
+
+@application.route("/api/signals/<int:signal_id>/performance", methods=["GET"])
+def get_signal_performance(signal_id):
+    """
+    Fetch performance data for a specific signal.
+    Returns tracked performance metrics if available.
+    """
+    try:
+        with get_session_context() as session:
+            # Get the signal first
+            signal = session.query(Signal).filter_by(id=signal_id).first()
+            if not signal:
+                return jsonify({"error": "Signal not found"}), 404
+            
+            # Get all performance records for this signal
+            performances = session.query(SignalPerformance).filter_by(signal_id=signal_id).all()
+            
+            if not performances:
+                return jsonify({
+                    "signal_id": signal_id,
+                    "symbol": signal.symbol,
+                    "status": "pending",
+                    "message": "Performance data not yet calculated. Signal is being monitored.",
+                    "performance": None
+                }), 200
+            
+            # Return the most recent performance record
+            latest_perf = performances[-1]  # Most recent
+            
+            return jsonify({
+                "signal_id": signal_id,
+                "symbol": signal.symbol,
+                "status": "completed",
+                "performance": {
+                    "exit_price": float(latest_perf.exit_price) if latest_perf.exit_price else None,
+                    "exit_reason": latest_perf.exit_reason,  # TP / SL / TIME
+                    "result": latest_perf.result,  # SUCCESS / FAILURE
+                    "return_percent": float(latest_perf.return_percent) if latest_perf.return_percent else None,
+                    "profit_usd": float(latest_perf.profit_usd) if latest_perf.profit_usd else None,
+                    "duration_minutes": latest_perf.duration_minutes,
+                    "tracked_at": latest_perf.tracked_at.isoformat() if latest_perf.tracked_at else None
+                },
+                "all_performances": [
+                    {
+                        "exit_price": float(p.exit_price) if p.exit_price else None,
+                        "exit_reason": p.exit_reason,
+                        "result": p.result,
+                        "return_percent": float(p.return_percent) if p.return_percent else None,
+                        "profit_usd": float(p.profit_usd) if p.profit_usd else None,
+                        "duration_minutes": p.duration_minutes,
+                        "tracked_at": p.tracked_at.isoformat() if p.tracked_at else None
+                    } for p in performances
+                ]
+            }), 200
+            
+    except Exception as e:
+        print(f"Error fetching signal performance: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@application.route("/api/user-signals/<user_sub>/performance", methods=["GET"])
+def get_user_signals_with_performance(user_sub):
+    """
+    Fetch all signals for a user's watchlist with their performance data if available.
+    More efficient than calling performance endpoint for each signal individually.
+    """
+    try:
+        with get_session_context() as session:
+            # Get user's watchlist
+            watchlist = session.query(Watchlist).filter_by(user_sub=user_sub).all()
+            
+            if not watchlist:
+                return jsonify({
+                    "signals": [],
+                    "message": "No coins in watchlist"
+                }), 200
+            
+            watched_symbols = [w.symbol for w in watchlist]
+            
+            # Get signals for watched symbols
+            signals = session.query(Signal).filter(
+                Signal.symbol.in_(watched_symbols)
+            ).order_by(
+                Signal.created_at.desc()
+            ).limit(50).all()
+            
+            result = []
+            for signal in signals:
+                payload = signal.payload or {}
+                
+                # Get user_signal data
+                user_signal = session.query(UserSignal).filter_by(
+                    user_sub=user_sub,
+                    signal_id=signal.id
+                ).first()
+                
+                # Get performance data
+                performance_records = session.query(SignalPerformance).filter_by(
+                    signal_id=signal.id
+                ).all()
+                
+                performance_data = None
+                perf_status = "pending"
+                
+                if performance_records:
+                    latest_perf = performance_records[-1]
+                    performance_data = {
+                        "exit_price": float(latest_perf.exit_price) if latest_perf.exit_price else None,
+                        "exit_reason": latest_perf.exit_reason,
+                        "result": latest_perf.result,
+                        "return_percent": float(latest_perf.return_percent) if latest_perf.return_percent else None,
+                        "profit_usd": float(latest_perf.profit_usd) if latest_perf.profit_usd else None,
+                        "duration_minutes": latest_perf.duration_minutes,
+                        "tracked_at": latest_perf.tracked_at.isoformat() if latest_perf.tracked_at else None
+                    }
+                    perf_status = "completed"
+                
+                result.append({
+                    "id": signal.id,
+                    "symbol": signal.symbol,
+                    "signal": payload.get("signal", "HOLD"),
+                    "confidence": payload.get("confidence", 0),
+                    "price": payload.get("price"),
+                    "timing": payload.get("timing", {}),
+                    "risk": payload.get("risk", {}),
+                    "sentiment": payload.get("sentiment", "Neutral"),
+                    "strategies": payload.get("top_contributing_strategies", []),
+                    "created_at": signal.created_at.isoformat() if signal.created_at else None,
+                    "pdf_status": user_signal.pdf_status if user_signal else None,
+                    "pdf_url": user_signal.pdf_url if user_signal else None,
+                    "performance_status": perf_status,
+                    "performance": performance_data
+                })
+            
+            return jsonify({
+                "signals": result,
+                "count": len(result),
+                "watchlist_count": len(watched_symbols)
+            }), 200
+            
+    except Exception as e:
+        print(f"Error fetching user signals with performance: {e}")
         traceback.print_exc()
         return jsonify({"error": "Failed to fetch signals"}), 500
 
