@@ -156,12 +156,15 @@ def process_all_coins():
                     signal_payload_with_id["id"] = signal.id
 
                     # Start monitoring in background (non-blocking)
-                    import threading
-                    threading.Thread(
-                        target=monitor_live_signal,
-                        args=(symbol, signal_payload_with_id),
-                        daemon=True
-                    ).start()
+                    import subprocess
+                    import sys
+
+                    subprocess.Popen(
+                        [sys.executable, "-m", "algo.backtesting.live_tracker_runner", json.dumps(signal_payload_with_id)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+
 
                     print(f"[{datetime.utcnow()}] ✅ Live performance tracking started for {symbol}")
                 except Exception as e:
