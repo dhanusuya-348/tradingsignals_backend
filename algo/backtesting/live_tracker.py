@@ -1,5 +1,8 @@
 # algo/backtesting/live_tracker.py
-def monitor_live_signal(symbol, signal_info, update_callback=None):
+def monitor_live_signal(symbol, signal_info, perf_id, update_callback=None):
+    """
+    Monitors a single signal in real-time and updates the corresponding SignalPerformance row.
+    """
     from models import get_session_context, SignalPerformance
     import time
     from datetime import datetime
@@ -36,17 +39,6 @@ def monitor_live_signal(symbol, signal_info, update_callback=None):
         return None
 
     print(f"📈 Tracking {symbol} from {valid_from} → {valid_to} for signal {signal}")
-
-    perf_id = None
-    with get_session_context() as session:
-        perf = SignalPerformance(
-            signal_id=signal_info.get("id"),
-            status="RUNNING",
-            tracked_at=datetime.utcnow()
-        )
-        session.add(perf)
-        session.commit()
-        perf_id = perf.id
 
     exit_reason = "TIME"
     exit_price = entry_price
@@ -99,7 +91,7 @@ def monitor_live_signal(symbol, signal_info, update_callback=None):
     )
     duration = int((exit_time - valid_from).total_seconds() / 60)
 
-    # Update SignalPerformance
+    # Update existing SignalPerformance
     try:
         with get_session_context() as session:
             perf = session.query(SignalPerformance).get(perf_id)
