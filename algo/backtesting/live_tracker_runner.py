@@ -1,9 +1,8 @@
-#algo/backtesting/live_tracker_runner.py
+# algo/backtesting/live_tracker_runner.py
 import sys
 import json
 import os
 
-# Add parent dirs to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from algo.backtesting.live_tracker import monitor_live_signal
