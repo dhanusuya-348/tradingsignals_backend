@@ -69,10 +69,13 @@ def scan_and_add_expired_signals():
     """
     print(f"[{datetime.utcnow()}] 📡 Scanner thread started")
     last_checked_id = load_last_checked_id(STATE_FILE_SCANNER)
+    print(f"[SCANNER] Loaded last_checked_id: {last_checked_id}")
 
     while True:
         try:
+            print(f"[SCANNER] [LOOP] Attempting DB query at {datetime.utcnow()}")
             with get_session_context() as session:
+                print(f"[SCANNER] [CONNECTED] Session acquired")
                 # Fetch signals after last_checked_id, created after START_DATE
                 signals = session.query(Signal)\
                     .filter(Signal.id > last_checked_id)\
@@ -156,10 +159,13 @@ def process_pending_signals():
     """
     print(f"[{datetime.utcnow()}] ⚙️  Processor thread started\n")
     last_processed_id = load_last_checked_id(STATE_FILE_PROCESSOR)
+    print(f"[PROCESSOR] Loaded last_processed_id: {last_processed_id}")
 
     while True:
         try:
+            print(f"[PROCESSOR] [LOOP] Attempting DB query at {datetime.utcnow()}")
             with get_session_context() as session:
+                print(f"[PROCESSOR] [CONNECTED] Session acquired")
                 # Fetch PENDING signals (limit to prevent memory issues)
                 pending_perfs = session.query(SignalPerformance)\
                     .filter_by(status="PENDING")\
