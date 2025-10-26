@@ -8,7 +8,8 @@ from models import get_session_context, SignalPerformance
 
 def monitor_live_signal(symbol, signal_info, perf_id, update_callback=None):
     """
-    Monitors a single signal in real-time and updates the corresponding SignalPerformance row.
+    Monitors a signal by backtesting it against historical price data from signal start → end time.
+    This is NOT real-time monitoring, but historical backtest evaluation.
     """
 
     # Handle payload as string or dict
@@ -74,60 +75,73 @@ def monitor_live_signal(symbol, signal_info, perf_id, update_callback=None):
         return None
 
     print(f"📈 Tracking {symbol} | Signal: {signal} | Entry: {entry_price} | SL: {stop_loss} | TP: {take_profit}")
-    print(f"   Active from {valid_from} → {valid_to}")
+    print(f"   Evaluating from {valid_from} → {valid_to}")
 
     exit_reason = "TIME"
     exit_price = entry_price
-    exit_time = None
+    exit_time = valid_to
 
-    # Monitor live until valid_to or exit condition triggered
-    while datetime.utcnow() < valid_to:
-        try:
-            df = fetch_binance_1m_data(symbol, valid_from, datetime.utcnow())
-            if df.empty:
-                print(f"[WARN] No price data for {symbol}, retrying...")
-                time.sleep(60)
-                continue
+    # ✅ FETCH HISTORICAL DATA FROM SIGNAL START TO END TIME (like backtester.py)
+    try:
+        minute_data = fetch_binance_1m_data(symbol, valid_from, valid_to)
+        
+        if minute_data.empty:
+            print(f"[WARN] No price data for {symbol} between {valid_from} and {valid_to}, using entry price as exit")
+            exit_price = entry_price
+            exit_reason = "NO_DATA"
+        else:
+            print(f"[DEBUG] Fetched {len(minute_data)} candles for {symbol}")
+            
+            # Check each candle for SL/TP hits
+            for t, row in minute_data.iterrows():
+                high = row["high"]
+                low = row["low"]
 
-            current_price = df.iloc[-1]["close"]
-            print(f"   {symbol} @ {current_price} (SL: {stop_loss}, TP: {take_profit})")
+                if signal == "BUY":
+                    # BUY: Check if SL hit first, then TP
+                    if stop_loss and low <= stop_loss:
+                        exit_reason = "SL"
+                        exit_price = stop_loss
+                        exit_time = t
+                        print(f"   ❌ BUY hit SL @ {stop_loss}")
+                        break
+                    elif take_profit and high >= take_profit:
+                        exit_reason = "TP"
+                        exit_price = take_profit
+                        exit_time = t
+                        print(f"   ✅ BUY hit TP @ {take_profit}")
+                        break
+                
+                else:  # SELL
+                    # SELL: Check if SL hit first, then TP
+                    if stop_loss and high >= stop_loss:
+                        exit_reason = "SL"
+                        exit_price = stop_loss
+                        exit_time = t
+                        print(f"   ❌ SELL hit SL @ {stop_loss}")
+                        break
+                    elif take_profit and low <= take_profit:
+                        exit_reason = "TP"
+                        exit_price = take_profit
+                        exit_time = t
+                        print(f"   ✅ SELL hit TP @ {take_profit}")
+                        break
+            
+            # If loop completes without SL/TP, exit at last price (TIME exit)
+            if exit_reason == "TIME":
+                last_row = minute_data.iloc[-1]
+                exit_price = last_row["close"]
+                exit_time = minute_data.index[-1]
+                print(f"   ⏱️ TIME exit @ {exit_price}")
 
-            if signal == "BUY":
-                if stop_loss and current_price <= stop_loss:
-                    exit_reason = "SL"
-                    exit_price = stop_loss
-                    exit_time = datetime.utcnow()
-                    print(f"   ❌ BUY signal hit SL @ {stop_loss}")
-                    break
-                elif take_profit and current_price >= take_profit:
-                    exit_reason = "TP"
-                    exit_price = take_profit
-                    exit_time = datetime.utcnow()
-                    print(f"   ✅ BUY signal hit TP @ {take_profit}")
-                    break
-            else:  # SELL
-                if stop_loss and current_price >= stop_loss:
-                    exit_reason = "SL"
-                    exit_price = stop_loss
-                    exit_time = datetime.utcnow()
-                    print(f"   ❌ SELL signal hit SL @ {stop_loss}")
-                    break
-                elif take_profit and current_price <= take_profit:
-                    exit_reason = "TP"
-                    exit_price = take_profit
-                    exit_time = datetime.utcnow()
-                    print(f"   ✅ SELL signal hit TP @ {take_profit}")
-                    break
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch price data for {symbol}: {e}")
+        import traceback
+        traceback.print_exc()
+        exit_price = entry_price
+        exit_reason = "ERROR"
 
-            time.sleep(60)
-        except Exception as e:
-            print(f"[ERROR] Live tracker failed for {symbol}: {e}")
-            time.sleep(60)
-            continue
-
-    if exit_time is None:
-        exit_time = datetime.utcnow()
-
+    # Calculate trade result with fees
     net_return_percent, result, net_profit = calculate_trade_result(
         signal, entry_price, exit_price, exit_reason
     )
@@ -139,7 +153,7 @@ def monitor_live_signal(symbol, signal_info, perf_id, update_callback=None):
     profit_usd_rounded = round(float(net_profit), 4)
 
     # Determine final status
-    final_status = "DONE" if result == "WIN" else "DONE"  # Both WIN/LOSS are "DONE"
+    final_status = "DONE"
 
     # Update SignalPerformance safely
     try:
@@ -160,6 +174,8 @@ def monitor_live_signal(symbol, signal_info, perf_id, update_callback=None):
                 print(f"[WARN] SignalPerformance ID {perf_id} not found")
     except Exception as e:
         print(f"[ERROR] Failed to update SignalPerformance for {symbol}: {e}")
+        import traceback
+        traceback.print_exc()
 
     # Optional callback for UI/logging
     if update_callback:
@@ -168,11 +184,11 @@ def monitor_live_signal(symbol, signal_info, perf_id, update_callback=None):
                 "symbol": symbol,
                 "signal": signal,
                 "entry_price": entry_price,
-                "exit_price": exit_price,
+                "exit_price": exit_price_rounded,
                 "exit_reason": exit_reason,
                 "result": result,
-                "profit_usd": net_profit,
-                "return_percent": net_return_percent,
+                "profit_usd": profit_usd_rounded,
+                "return_percent": return_percent_rounded,
                 "duration_minutes": duration
             })
         except Exception as e:
