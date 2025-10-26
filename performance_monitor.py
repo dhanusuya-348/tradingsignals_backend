@@ -2,6 +2,7 @@
 import time
 from datetime import datetime
 from threading import Thread
+import json  # <-- added
 
 # Load .env variables for local testing
 try:
@@ -61,6 +62,15 @@ def add_new_signals():
 
                 for sig in new_signals:
                     payload = sig.payload or {}
+
+                    # --- Parse JSON if payload is string ---
+                    if isinstance(payload, str):
+                        try:
+                            payload = json.loads(payload)
+                        except Exception as e:
+                            print(f"[ERROR] Failed to parse payload for Signal ID {sig.id}: {e}")
+                            continue
+
                     timing = payload.get("timing", {})
                     valid_to_str = timing.get("end")
 
