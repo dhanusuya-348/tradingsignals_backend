@@ -19,7 +19,6 @@ START_DATE = datetime(2025, 10, 25)  # Only consider signals after this date
 CHECK_INTERVAL = 60  # Seconds between checking for new signals
 STATE_FILE = "/tmp/perfmon_last_id.txt"
 
-
 def load_last_checked_id():
     try:
         with open(STATE_FILE, "r") as f:
@@ -27,11 +26,9 @@ def load_last_checked_id():
     except:
         return 0
 
-
 def save_last_checked_id(last_id):
     with open(STATE_FILE, "w") as f:
         f.write(str(last_id))
-
 
 def process_signal_thread(signal_obj, perf_id):
     """
@@ -41,7 +38,6 @@ def process_signal_thread(signal_obj, perf_id):
         monitor_live_signal(signal_obj.symbol, signal_obj.payload, perf_id)
     except Exception as e:
         print(f"[ERROR] Exception while processing signal {signal_obj.id}: {e}")
-
 
 def add_new_signals():
     """
@@ -99,6 +95,7 @@ def add_new_signals():
                     thread = Thread(target=process_signal_thread, args=(sig, perf.id))
                     thread.start()
 
+                    # Update last_checked_id
                     last_checked_id = max(last_checked_id, sig.id)
                     save_last_checked_id(last_checked_id)
 
@@ -106,7 +103,6 @@ def add_new_signals():
             print(f"[ERROR] Failed to fetch/add new signals: {e}")
 
         time.sleep(CHECK_INTERVAL)
-
 
 if __name__ == "__main__":
     print(f"[{datetime.utcnow()}] 🚀 Starting Performance Monitor...")
