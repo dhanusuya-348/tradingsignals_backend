@@ -1,6 +1,7 @@
 # algo/backtesting/live_tracker.py
 import time
 from datetime import datetime
+import json
 from ..data.fetch_price import fetch_binance_1m_data
 from ..backtesting.backtester import calculate_trade_result
 from models import get_session_context, SignalPerformance
@@ -9,6 +10,14 @@ def monitor_live_signal(symbol, signal_info, perf_id, update_callback=None):
     """
     Monitors a single signal in real-time and updates the corresponding SignalPerformance row.
     """
+
+    # Handle payload as string or dict
+    if isinstance(signal_info, str):
+        try:
+            signal_info = json.loads(signal_info)
+        except Exception as e:
+            print(f"[ERROR] Failed to parse signal_info: {e}")
+            return None
 
     # Normalize symbol
     symbol = symbol.upper()
@@ -42,12 +51,17 @@ def monitor_live_signal(symbol, signal_info, perf_id, update_callback=None):
     timing_info = signal_info.get("timing", {})
     valid_from_str = timing_info.get("start")
     valid_to_str = timing_info.get("end")
+    
     if not valid_from_str or not valid_to_str:
         print(f"[WARN] Missing timing info for {symbol}, skipping")
         return None
 
-    valid_from = datetime.strptime(valid_from_str, "%Y-%m-%d %H:%M:%S")
-    valid_to = datetime.strptime(valid_to_str, "%Y-%m-%d %H:%M:%S")
+    try:
+        valid_from = datetime.strptime(valid_from_str, "%Y-%m-%d %H:%M:%S")
+        valid_to = datetime.strptime(valid_to_str, "%Y-%m-%d %H:%M:%S")
+    except Exception as e:
+        print(f"[ERROR] Failed to parse timing: {e}")
+        return None
 
     # Skip HOLD or REJECTED signals
     if signal == "HOLD" or signal_info.get("decision") == "REJECTED":
@@ -59,7 +73,8 @@ def monitor_live_signal(symbol, signal_info, perf_id, update_callback=None):
         print(f"⚠️ Skipping {symbol} - Missing entry price")
         return None
 
-    print(f"📈 Tracking {symbol} from {valid_from} → {valid_to} for signal {signal}")
+    print(f"📈 Tracking {symbol} | Signal: {signal} | Entry: {entry_price} | SL: {stop_loss} | TP: {take_profit}")
+    print(f"   Active from {valid_from} → {valid_to}")
 
     exit_reason = "TIME"
     exit_price = entry_price
@@ -70,32 +85,38 @@ def monitor_live_signal(symbol, signal_info, perf_id, update_callback=None):
         try:
             df = fetch_binance_1m_data(symbol, valid_from, datetime.utcnow())
             if df.empty:
+                print(f"[WARN] No price data for {symbol}, retrying...")
                 time.sleep(60)
                 continue
 
             current_price = df.iloc[-1]["close"]
+            print(f"   {symbol} @ {current_price} (SL: {stop_loss}, TP: {take_profit})")
 
             if signal == "BUY":
                 if stop_loss and current_price <= stop_loss:
                     exit_reason = "SL"
                     exit_price = stop_loss
                     exit_time = datetime.utcnow()
+                    print(f"   ❌ BUY signal hit SL @ {stop_loss}")
                     break
                 elif take_profit and current_price >= take_profit:
                     exit_reason = "TP"
                     exit_price = take_profit
                     exit_time = datetime.utcnow()
+                    print(f"   ✅ BUY signal hit TP @ {take_profit}")
                     break
             else:  # SELL
                 if stop_loss and current_price >= stop_loss:
                     exit_reason = "SL"
                     exit_price = stop_loss
                     exit_time = datetime.utcnow()
+                    print(f"   ❌ SELL signal hit SL @ {stop_loss}")
                     break
                 elif take_profit and current_price <= take_profit:
                     exit_reason = "TP"
                     exit_price = take_profit
                     exit_time = datetime.utcnow()
+                    print(f"   ✅ SELL signal hit TP @ {take_profit}")
                     break
 
             time.sleep(60)
@@ -112,6 +133,9 @@ def monitor_live_signal(symbol, signal_info, perf_id, update_callback=None):
     )
     duration = int((exit_time - valid_from).total_seconds() / 60)
 
+    # Determine final status
+    final_status = "DONE" if result == "WIN" else "DONE"  # Both WIN/LOSS are "DONE"
+
     # Update SignalPerformance safely
     try:
         with get_session_context() as session:
@@ -124,9 +148,9 @@ def monitor_live_signal(symbol, signal_info, perf_id, update_callback=None):
                 perf.profit_usd = str(net_profit)
                 perf.duration_minutes = duration
                 perf.tracked_at = datetime.utcnow()
-                perf.status = "SUCCESS" if result != "FAILED" else "FAILED"
+                perf.status = final_status
                 session.commit()
-                print(f"💾 Updated SignalPerformance ID {perf_id} → {perf.status}")
+                print(f"💾 Updated SignalPerformance ID {perf_id} → {final_status} | Result: {result} | Profit: ${net_profit}")
             else:
                 print(f"[WARN] SignalPerformance ID {perf_id} not found")
     except Exception as e:
