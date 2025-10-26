@@ -1,7 +1,7 @@
 # performance_monitor.py
 import time
 from datetime import datetime
-from threading import Thread
+from threading import Thread, Lock
 import json
 
 # Load .env variables for local testing
@@ -21,6 +21,9 @@ CHECK_INTERVAL = 30  # Seconds between checks
 STATE_FILE_SCANNER = "/tmp/perfmon_scanner_last_id.txt"
 STATE_FILE_PROCESSOR = "/tmp/perfmon_processor_last_id.txt"
 
+# Thread-safe lock for DB operations
+db_lock = Lock()
+
 def load_last_checked_id(state_file):
     try:
         with open(state_file, "r") as f:
@@ -32,14 +35,29 @@ def save_last_checked_id(state_file, last_id):
     with open(state_file, "w") as f:
         f.write(str(last_id))
 
-def process_signal_thread(signal_obj, perf_id):
+def process_signal_thread(signal_id, perf_id):
     """Thread to monitor a single signal in real-time"""
     try:
-        result = monitor_live_signal(signal_obj.symbol, signal_obj.payload, perf_id)
+        # Fetch signal in a new session (thread-safe)
+        with get_session_context() as session:
+            signal_obj = session.query(Signal).filter_by(id=signal_id).first()
+            if not signal_obj:
+                print(f"[ERROR] Signal ID {signal_id} not found")
+                return False
+            
+            # Detach from session before passing to monitor_live_signal
+            symbol = signal_obj.symbol
+            payload = signal_obj.payload
+        
+        # Now monitor it (outside the session context)
+        result = monitor_live_signal(symbol, payload, perf_id)
         if result:
-            print(f"✅ Signal {signal_obj.id} completed")
+            print(f"✅ Signal {signal_id} completed")
+        return result
+        
     except Exception as e:
-        print(f"[ERROR] Exception while processing signal {signal_obj.id}: {e}")
+        print(f"[ERROR] Exception while processing signal {signal_id}: {e}")
+        return False
 
 def scan_and_add_expired_signals():
     """
@@ -51,77 +69,81 @@ def scan_and_add_expired_signals():
 
     while True:
         try:
-            with get_session_context() as session:
-                # Fetch signals after last_checked_id, created after START_DATE
-                signals = session.query(Signal)\
-                    .filter(Signal.id > last_checked_id)\
-                    .filter(Signal.created_at >= START_DATE)\
-                    .order_by(Signal.id.asc())\
-                    .all()
+            with db_lock:
+                with get_session_context() as session:
+                    # Fetch signals after last_checked_id, created after START_DATE
+                    signals = session.query(Signal)\
+                        .filter(Signal.id > last_checked_id)\
+                        .filter(Signal.created_at >= START_DATE)\
+                        .order_by(Signal.id.asc())\
+                        .all()
 
-                if signals:
-                    print(f"[SCANNER] Found {len(signals)} new signal(s) to check")
-                    processed_count = 0
+                    if signals:
+                        print(f"[SCANNER] Found {len(signals)} new signal(s) to check")
+                        processed_count = 0
 
-                    for sig in signals:
-                        payload = sig.payload or {}
+                        for sig in signals:
+                            payload = sig.payload or {}
 
-                        # Parse JSON if payload is string
-                        if isinstance(payload, str):
-                            try:
-                                payload = json.loads(payload)
-                            except Exception as e:
-                                print(f"[ERROR] Failed to parse payload for Signal ID {sig.id}: {e}")
+                            # Parse JSON if payload is string
+                            if isinstance(payload, str):
+                                try:
+                                    payload = json.loads(payload)
+                                except Exception as e:
+                                    print(f"[ERROR] Failed to parse payload for Signal ID {sig.id}: {e}")
+                                    last_checked_id = max(last_checked_id, sig.id)
+                                    continue
+
+                            # Extract timing info
+                            timing = payload.get("timing", {})
+                            valid_to_str = timing.get("end")
+
+                            if not valid_to_str:
+                                print(f"[WARN] Signal ID {sig.id} has no timing.end, skipping")
                                 last_checked_id = max(last_checked_id, sig.id)
                                 continue
 
-                        # Extract timing info
-                        timing = payload.get("timing", {})
-                        valid_to_str = timing.get("end")
+                            try:
+                                valid_to = datetime.strptime(valid_to_str, "%Y-%m-%d %H:%M:%S")
+                            except Exception as e:
+                                print(f"[ERROR] Failed to parse valid_to for Signal ID {sig.id}: {e}")
+                                last_checked_id = max(last_checked_id, sig.id)
+                                continue
 
-                        if not valid_to_str:
-                            print(f"[WARN] Signal ID {sig.id} has no timing.end, skipping")
-                            last_checked_id = max(last_checked_id, sig.id)
-                            continue
-
-                        try:
-                            valid_to = datetime.strptime(valid_to_str, "%Y-%m-%d %H:%M:%S")
-                        except Exception as e:
-                            print(f"[ERROR] Failed to parse valid_to for Signal ID {sig.id}: {e}")
-                            last_checked_id = max(last_checked_id, sig.id)
-                            continue
-
-                        # Check if signal is EXPIRED (valid_to is in the past)
-                        now = datetime.utcnow()
-                        if now >= valid_to:
-                            # Check if already in signal_performance
-                            exists = session.query(SignalPerformance).filter_by(signal_id=sig.id).first()
-                            
-                            if not exists:
-                                perf = SignalPerformance(
-                                    signal_id=sig.id,
-                                    status="PENDING",
-                                    tracked_at=now
-                                )
-                                session.add(perf)
-                                session.commit()
-                                print(f"🟢 Signal {sig.id} added to SignalPerformance (ID {perf.id}) - EXPIRED at {valid_to}")
-                                processed_count += 1
+                            # Check if signal is EXPIRED (valid_to is in the past)
+                            now = datetime.utcnow()
+                            if now >= valid_to:
+                                # Check if already in signal_performance
+                                exists = session.query(SignalPerformance).filter_by(signal_id=sig.id).first()
+                                
+                                if not exists:
+                                    perf = SignalPerformance(
+                                        signal_id=sig.id,
+                                        status="PENDING",
+                                        tracked_at=now
+                                    )
+                                    session.add(perf)
+                                    session.commit()
+                                    print(f"🟢 Signal {sig.id} added to SignalPerformance (ID {perf.id}) - EXPIRED at {valid_to}")
+                                    processed_count += 1
+                                else:
+                                    print(f"[INFO] Signal {sig.id} already tracked, skipping")
                             else:
-                                print(f"[INFO] Signal {sig.id} already tracked, skipping")
-                        else:
-                            time_remaining = (valid_to - now).total_seconds() / 60
-                            print(f"[INFO] Signal ID {sig.id} still active ({time_remaining:.1f} min left), skipping")
+                                time_remaining = (valid_to - now).total_seconds() / 60
+                                print(f"[INFO] Signal ID {sig.id} still active ({time_remaining:.1f} min left), skipping")
 
-                        # Always update last_checked_id after processing
-                        last_checked_id = max(last_checked_id, sig.id)
+                            # Always update last_checked_id after processing
+                            last_checked_id = max(last_checked_id, sig.id)
 
                     # Save state only after processing batch
                     save_last_checked_id(STATE_FILE_SCANNER, last_checked_id)
-                    print(f"[SCANNER] Saved state: last_checked_id={last_checked_id}")
+                    if signals:
+                        print(f"[SCANNER] Saved state: last_checked_id={last_checked_id}\n")
 
         except Exception as e:
             print(f"[ERROR] Scanner failed: {e}")
+            import traceback
+            traceback.print_exc()
 
         time.sleep(CHECK_INTERVAL)
 
@@ -130,57 +152,70 @@ def process_pending_signals():
     Phase 2: Process all PENDING signals in signal_performance table
     by fetching corresponding signal data and running backtest
     """
-    print(f"[{datetime.utcnow()}] ⚙️  Processor thread started")
+    print(f"[{datetime.utcnow()}] ⚙️  Processor thread started\n")
     last_processed_id = load_last_checked_id(STATE_FILE_PROCESSOR)
 
     while True:
         try:
-            with get_session_context() as session:
-                # Fetch PENDING signals
-                pending_perfs = session.query(SignalPerformance)\
-                    .filter_by(status="PENDING")\
-                    .filter(SignalPerformance.id > last_processed_id)\
-                    .order_by(SignalPerformance.id.asc())\
-                    .all()
+            with db_lock:
+                with get_session_context() as session:
+                    # Fetch PENDING signals (limit to prevent memory issues)
+                    pending_perfs = session.query(SignalPerformance)\
+                        .filter_by(status="PENDING")\
+                        .filter(SignalPerformance.id > last_processed_id)\
+                        .order_by(SignalPerformance.id.asc())\
+                        .limit(5)\
+                        .all()
 
-                if pending_perfs:
-                    print(f"[PROCESSOR] Found {len(pending_perfs)} PENDING signal(s) to process")
+                    if pending_perfs:
+                        print(f"[PROCESSOR] Found {len(pending_perfs)} PENDING signal(s) to process")
 
-                    for perf in pending_perfs:
-                        try:
-                            # Fetch the actual signal
-                            signal_obj = session.query(Signal).filter_by(id=perf.signal_id).first()
-                            
-                            if not signal_obj:
-                                print(f"[WARN] Signal ID {perf.signal_id} not found in signals table")
-                                perf.status = "FAILED"
+                        for perf in pending_perfs:
+                            try:
+                                signal_id = perf.signal_id
+                                perf_id = perf.id
+                                
+                                # Update status to RUNNING inside lock
+                                perf.status = "RUNNING"
                                 session.commit()
+                                print(f"📊 Processing Signal {signal_id} (PerfID {perf_id})...")
+
                                 last_processed_id = max(last_processed_id, perf.id)
-                                continue
 
-                            # Update status to RUNNING
-                            perf.status = "RUNNING"
-                            session.commit()
-                            print(f"📊 Processing Signal {signal_obj.id} (PerfID {perf.id})...")
+                            except Exception as e:
+                                print(f"[ERROR] Failed to update signal_performance ID {perf.id}: {e}")
+                                import traceback
+                                traceback.print_exc()
+                                last_processed_id = max(last_processed_id, perf.id)
 
-                            # Start backtesting in a thread
-                            thread = Thread(target=process_signal_thread, args=(signal_obj, perf.id))
-                            thread.daemon = True
-                            thread.start()
+                    # Save state after batch
+                    if pending_perfs:
+                        save_last_checked_id(STATE_FILE_PROCESSOR, last_processed_id)
 
-                            last_processed_id = max(last_processed_id, perf.id)
-
-                        except Exception as e:
-                            print(f"[ERROR] Failed to process signal_performance ID {perf.id}: {e}")
-                            perf.status = "FAILED"
-                            session.commit()
-                            last_processed_id = max(last_processed_id, perf.id)
-
-                    save_last_checked_id(STATE_FILE_PROCESSOR, last_processed_id)
-                    print(f"[PROCESSOR] Saved state: last_processed_id={last_processed_id}")
+            # NOW start threads OUTSIDE the db_lock context
+            # So they don't block the processor loop
+            with db_lock:
+                with get_session_context() as session:
+                    running_signals = session.query(SignalPerformance)\
+                        .filter_by(status="RUNNING")\
+                        .order_by(SignalPerformance.id.asc())\
+                        .limit(3)\
+                        .all()
+                    
+                    for perf in running_signals:
+                        signal_id = perf.signal_id
+                        perf_id = perf.id
+                        
+                        # Start thread (outside lock)
+                        thread = Thread(target=process_signal_thread, args=(signal_id, perf_id))
+                        thread.daemon = True
+                        thread.start()
+                        print(f"   🧵 Started backtest thread for Signal {signal_id}")
 
         except Exception as e:
             print(f"[ERROR] Processor failed: {e}")
+            import traceback
+            traceback.print_exc()
 
         time.sleep(CHECK_INTERVAL)
 
