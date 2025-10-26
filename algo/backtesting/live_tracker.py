@@ -133,6 +133,11 @@ def monitor_live_signal(symbol, signal_info, perf_id, update_callback=None):
     )
     duration = int((exit_time - valid_from).total_seconds() / 60)
 
+    # Round to 4 decimal places
+    exit_price_rounded = round(float(exit_price), 4)
+    return_percent_rounded = round(float(net_return_percent), 4)
+    profit_usd_rounded = round(float(net_profit), 4)
+
     # Determine final status
     final_status = "DONE" if result == "WIN" else "DONE"  # Both WIN/LOSS are "DONE"
 
@@ -141,16 +146,16 @@ def monitor_live_signal(symbol, signal_info, perf_id, update_callback=None):
         with get_session_context() as session:
             perf = session.query(SignalPerformance).get(perf_id)
             if perf:
-                perf.exit_price = str(exit_price)
+                perf.exit_price = str(exit_price_rounded)
                 perf.exit_reason = exit_reason
                 perf.result = result
-                perf.return_percent = str(net_return_percent)
-                perf.profit_usd = str(net_profit)
+                perf.return_percent = str(return_percent_rounded)
+                perf.profit_usd = str(profit_usd_rounded)
                 perf.duration_minutes = duration
                 perf.tracked_at = datetime.utcnow()
                 perf.status = final_status
                 session.commit()
-                print(f"💾 Updated SignalPerformance ID {perf_id} → {final_status} | Result: {result} | Profit: ${net_profit}")
+                print(f"💾 Updated SignalPerformance ID {perf_id} → {final_status} | Result: {result} | Profit: ${profit_usd_rounded}")
             else:
                 print(f"[WARN] SignalPerformance ID {perf_id} not found")
     except Exception as e:
