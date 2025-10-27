@@ -62,69 +62,6 @@ def process_signal_thread(signal_id, perf_id):
         traceback.print_exc()
         return False
 
-import sys
-import time
-from datetime import datetime
-from threading import Thread
-import json
-
-# Force unbuffered output for systemd logs
-sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
-
-# Load .env variables for local testing
-try:
-    from load_env import load_env_file
-    load_env_file()
-    print(f"[{datetime.utcnow()}] ✅ Loaded .env variables")
-except ImportError:
-    print(f"[{datetime.utcnow()}] ⚠ load_env.py not found, using system environment variables")
-
-from models import get_session_context, Signal, SignalPerformance
-from algo.backtesting.live_tracker import monitor_live_signal
-
-# --- CONFIG ---
-START_DATE = datetime(2025, 10, 25)
-CHECK_INTERVAL = 30  # Seconds between checks
-STATE_FILE_SCANNER = "/tmp/perfmon_scanner_last_id.txt"
-STATE_FILE_PROCESSOR = "/tmp/perfmon_processor_last_id.txt"
-
-def load_last_checked_id(state_file):
-    try:
-        with open(state_file, "r") as f:
-            return int(f.read().strip())
-    except:
-        return 0
-
-def save_last_checked_id(state_file, last_id):
-    with open(state_file, "w") as f:
-        f.write(str(last_id))
-
-def process_signal_thread(signal_id, perf_id):
-    """Thread to monitor a single signal in real-time"""
-    try:
-        # Fetch signal in a new session (thread-safe)
-        with get_session_context() as session:
-            signal_obj = session.query(Signal).filter_by(id=signal_id).first()
-            if not signal_obj:
-                print(f"[ERROR] Signal ID {signal_id} not found")
-                return False
-            
-            # Detach from session before passing to monitor_live_signal
-            symbol = signal_obj.symbol
-            payload = signal_obj.payload
-        
-        # Now monitor it (outside the session context)
-        result = monitor_live_signal(symbol, payload, perf_id)
-        if result:
-            print(f"✅ Signal {signal_id} completed")
-        return result
-        
-    except Exception as e:
-        print(f"[ERROR] Exception while processing signal {signal_id}: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
 def scan_and_add_expired_signals():
     """
     Phase 1: Scan signals table for EXPIRED signals and add them to signal_performance
@@ -175,7 +112,7 @@ def scan_and_add_expired_signals():
                         valid_to_str = timing.get("end")
 
                         if not valid_to_str:
-                            print(f"[WARN] Signal ID {sig.id} has no timing.end, skipping")
+                            print(f"[WARN] Signal ID {sig.id} has no timing.end, skipping permanently")
                             last_checked_id = max(last_checked_id, sig.id)
                             continue
 
@@ -204,16 +141,17 @@ def scan_and_add_expired_signals():
                                 processed_count += 1
                             else:
                                 print(f"[INFO] Signal {sig.id} already tracked, skipping")
+                            
+                            # ✅ Only update last_checked_id for EXPIRED signals (processed or already tracked)
+                            last_checked_id = max(last_checked_id, sig.id)
                         else:
                             time_remaining = (valid_to - now).total_seconds() / 60
-                            print(f"[INFO] Signal ID {sig.id} still active ({time_remaining:.1f} min left), skipping")
-
-                        # Always update last_checked_id after processing
-                        last_checked_id = max(last_checked_id, sig.id)
+                            print(f"[INFO] Signal ID {sig.id} still active ({time_remaining:.1f} min left), NOT updating last_checked_id")
+                            # ❌ DON'T update last_checked_id - we need to check this signal again when it expires!
 
                     # Save state only after processing batch
-                    save_last_checked_id(STATE_FILE_SCANNER, last_checked_id)
-                    if signals:
+                    if processed_count > 0 or any(now >= datetime.strptime(json.loads(s.payload if isinstance(s.payload, str) else json.dumps(s.payload)).get("timing", {}).get("end", "2099-01-01 00:00:00"), "%Y-%m-%d %H:%M:%S") for s in signals if s.payload):
+                        save_last_checked_id(STATE_FILE_SCANNER, last_checked_id)
                         print(f"[SCANNER] Saved state: last_checked_id={last_checked_id}\n")
                 else:
                     print(f"[SCANNER] [DEBUG] No new signals found (last_checked_id={last_checked_id})")
@@ -311,4 +249,3 @@ if __name__ == "__main__":
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n[SHUTDOWN] Performance Monitor shutting down...")
- 
