@@ -62,6 +62,69 @@ def process_signal_thread(signal_id, perf_id):
         traceback.print_exc()
         return False
 
+import sys
+import time
+from datetime import datetime
+from threading import Thread
+import json
+
+# Force unbuffered output for systemd logs
+sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
+
+# Load .env variables for local testing
+try:
+    from load_env import load_env_file
+    load_env_file()
+    print(f"[{datetime.utcnow()}] ✅ Loaded .env variables")
+except ImportError:
+    print(f"[{datetime.utcnow()}] ⚠ load_env.py not found, using system environment variables")
+
+from models import get_session_context, Signal, SignalPerformance
+from algo.backtesting.live_tracker import monitor_live_signal
+
+# --- CONFIG ---
+START_DATE = datetime(2025, 10, 25)
+CHECK_INTERVAL = 30  # Seconds between checks
+STATE_FILE_SCANNER = "/tmp/perfmon_scanner_last_id.txt"
+STATE_FILE_PROCESSOR = "/tmp/perfmon_processor_last_id.txt"
+
+def load_last_checked_id(state_file):
+    try:
+        with open(state_file, "r") as f:
+            return int(f.read().strip())
+    except:
+        return 0
+
+def save_last_checked_id(state_file, last_id):
+    with open(state_file, "w") as f:
+        f.write(str(last_id))
+
+def process_signal_thread(signal_id, perf_id):
+    """Thread to monitor a single signal in real-time"""
+    try:
+        # Fetch signal in a new session (thread-safe)
+        with get_session_context() as session:
+            signal_obj = session.query(Signal).filter_by(id=signal_id).first()
+            if not signal_obj:
+                print(f"[ERROR] Signal ID {signal_id} not found")
+                return False
+            
+            # Detach from session before passing to monitor_live_signal
+            symbol = signal_obj.symbol
+            payload = signal_obj.payload
+        
+        # Now monitor it (outside the session context)
+        result = monitor_live_signal(symbol, payload, perf_id)
+        if result:
+            print(f"✅ Signal {signal_id} completed")
+        return result
+        
+    except Exception as e:
+        print(f"[ERROR] Exception while processing signal {signal_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 def scan_and_add_expired_signals():
     """
     Phase 1: Scan signals table for EXPIRED signals and add them to signal_performance
@@ -76,6 +139,14 @@ def scan_and_add_expired_signals():
             print(f"[SCANNER] [LOOP] Attempting DB query at {datetime.utcnow()}")
             with get_session_context() as session:
                 print(f"[SCANNER] [CONNECTED] Session acquired")
+                
+                # DEBUG: Check total count first
+                total_signals = session.query(Signal).filter(
+                    Signal.id > last_checked_id,
+                    Signal.created_at >= START_DATE
+                ).count()
+                print(f"[SCANNER] [DEBUG] Found {total_signals} signals with ID > {last_checked_id} and created_at >= {START_DATE}")
+                
                 # Fetch signals after last_checked_id, created after START_DATE
                 signals = session.query(Signal)\
                     .filter(Signal.id > last_checked_id)\
@@ -144,6 +215,8 @@ def scan_and_add_expired_signals():
                     save_last_checked_id(STATE_FILE_SCANNER, last_checked_id)
                     if signals:
                         print(f"[SCANNER] Saved state: last_checked_id={last_checked_id}\n")
+                else:
+                    print(f"[SCANNER] [DEBUG] No new signals found (last_checked_id={last_checked_id})")
 
         except Exception as e:
             print(f"[ERROR] Scanner failed: {e}")
@@ -166,6 +239,14 @@ def process_pending_signals():
             print(f"[PROCESSOR] [LOOP] Attempting DB query at {datetime.utcnow()}")
             with get_session_context() as session:
                 print(f"[PROCESSOR] [CONNECTED] Session acquired")
+                
+                # DEBUG: Check total pending count
+                total_pending = session.query(SignalPerformance).filter(
+                    SignalPerformance.status == "PENDING",
+                    SignalPerformance.id > last_processed_id
+                ).count()
+                print(f"[PROCESSOR] [DEBUG] Found {total_pending} PENDING signals with ID > {last_processed_id}")
+                
                 # Fetch PENDING signals (limit to prevent memory issues)
                 pending_perfs = session.query(SignalPerformance)\
                     .filter_by(status="PENDING")\
@@ -203,6 +284,8 @@ def process_pending_signals():
                     # Save state after batch
                     save_last_checked_id(STATE_FILE_PROCESSOR, last_processed_id)
                     print(f"[PROCESSOR] Saved state: last_processed_id={last_processed_id}\n")
+                else:
+                    print(f"[PROCESSOR] [DEBUG] No PENDING signals found (last_processed_id={last_processed_id})")
 
         except Exception as e:
             print(f"[ERROR] Processor failed: {e}")
@@ -228,3 +311,4 @@ if __name__ == "__main__":
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n[SHUTDOWN] Performance Monitor shutting down...")
+ 

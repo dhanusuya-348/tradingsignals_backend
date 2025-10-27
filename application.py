@@ -1,6 +1,6 @@
 # application.py
 from flask import Flask, request, jsonify, send_file
-from models import Base, get_engine_from_env, get_session_context, Watchlist, Signal, UserSignal, User, SignalPerformance
+from models import Base, get_engine_from_env, get_session_context, Watchlist, Signal, UserSignal, User, SignalPerformance, Review
 from datetime import datetime
 from flask_cors import CORS
 from sqlalchemy import desc
@@ -175,6 +175,183 @@ def download_pdf(job_id):
         
     except Exception as e:
         print(f"Error downloading PDF: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+    
+
+# ======================
+# REVIEW ROUTES
+# ======================
+
+@application.route("/api/reviews/submit", methods=["POST"])
+def submit_review():
+    """Submit a new review (requires authentication)"""
+    try:
+        data = request.json or {}
+        user_sub = data.get("user_sub")
+        email = data.get("email")
+        name = data.get("name")
+        rating = data.get("rating")
+        comment = data.get("comment")
+        
+        # Validation
+        if not all([user_sub, email, name, rating, comment]):
+            return jsonify({"error": "All fields are required"}), 400
+        
+        if not isinstance(rating, int) or rating < 1 or rating > 5:
+            return jsonify({"error": "Rating must be between 1 and 5"}), 400
+        
+        if len(comment.strip()) < 10:
+            return jsonify({"error": "Comment must be at least 10 characters"}), 400
+        
+        with get_session_context() as session:
+            # Check if user exists
+            user = session.query(User).filter_by(user_sub=user_sub).first()
+            if not user:
+                return jsonify({"error": "User not found. Please sign up first."}), 404
+            
+            # Check subscription status (optional - only allow subscribers to review)
+            if user.subscription_status not in ['active', 'pro', 'max']:
+                return jsonify({"error": "Only subscribers can post reviews"}), 403
+            
+            # Create new review
+            review = Review(
+                user_sub=user_sub,
+                email=email,
+                name=name,
+                rating=rating,
+                comment=comment.strip(),
+                verified=False,  # Admin must verify
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            session.add(review)
+            
+            return jsonify({
+                "ok": True,
+                "message": "Review submitted successfully! It will be published after verification.",
+                "review": review.to_dict()
+            }), 201
+            
+    except Exception as e:
+        print(f"Error submitting review: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@application.route("/api/reviews/verified", methods=["GET"])
+def get_verified_reviews():
+    """Get all verified reviews for public display"""
+    try:
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+        
+        with get_session_context() as session:
+            # Get total count
+            total_count = session.query(Review).filter_by(verified=True).count()
+            
+            # Fetch verified reviews
+            reviews = session.query(Review).filter_by(
+                verified=True
+            ).order_by(
+                Review.created_at.desc()
+            ).limit(limit).offset(offset).all()
+            
+            return jsonify({
+                "reviews": [r.to_dict() for r in reviews],
+                "pagination": {
+                    "total": total_count,
+                    "limit": limit,
+                    "offset": offset,
+                    "has_more": offset + limit < total_count
+                }
+            }), 200
+            
+    except Exception as e:
+        print(f"Error fetching verified reviews: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@application.route("/api/reviews/pending", methods=["GET"])
+def get_pending_reviews():
+    """Get all pending (unverified) reviews - ADMIN ONLY"""
+    try:
+        # Simple admin check - you can enhance this with proper auth later
+        admin_key = request.headers.get('X-Admin-Key')
+        if admin_key != os.environ.get('ADMIN_SECRET_KEY', 'your-secret-admin-key'):
+            return jsonify({"error": "Unauthorized"}), 403
+        
+        with get_session_context() as session:
+            reviews = session.query(Review).filter_by(
+                verified=False
+            ).order_by(
+                Review.created_at.desc()
+            ).all()
+            
+            return jsonify({
+                "reviews": [r.to_dict() for r in reviews],
+                "count": len(reviews)
+            }), 200
+            
+    except Exception as e:
+        print(f"Error fetching pending reviews: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@application.route("/api/reviews/verify/<int:review_id>", methods=["POST"])
+def verify_review(review_id):
+    """Verify a review - ADMIN ONLY"""
+    try:
+        # Admin authentication
+        admin_key = request.headers.get('X-Admin-Key')
+        if admin_key != os.environ.get('ADMIN_SECRET_KEY', 'your-secret-admin-key'):
+            return jsonify({"error": "Unauthorized"}), 403
+        
+        with get_session_context() as session:
+            review = session.query(Review).filter_by(id=review_id).first()
+            if not review:
+                return jsonify({"error": "Review not found"}), 404
+            
+            review.verified = True
+            review.updated_at = datetime.utcnow()
+            
+            return jsonify({
+                "ok": True,
+                "message": f"Review #{review_id} verified successfully",
+                "review": review.to_dict()
+            }), 200
+            
+    except Exception as e:
+        print(f"Error verifying review: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@application.route("/api/reviews/delete/<int:review_id>", methods=["DELETE"])
+def delete_review(review_id):
+    """Delete a review - ADMIN ONLY"""
+    try:
+        # Admin authentication
+        admin_key = request.headers.get('X-Admin-Key')
+        if admin_key != os.environ.get('ADMIN_SECRET_KEY', 'your-secret-admin-key'):
+            return jsonify({"error": "Unauthorized"}), 403
+        
+        with get_session_context() as session:
+            review = session.query(Review).filter_by(id=review_id).first()
+            if not review:
+                return jsonify({"error": "Review not found"}), 404
+            
+            session.delete(review)
+            
+            return jsonify({
+                "ok": True,
+                "message": f"Review #{review_id} deleted successfully"
+            }), 200
+            
+    except Exception as e:
+        print(f"Error deleting review: {e}")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
@@ -670,6 +847,247 @@ def get_user_signals_with_performance(user_sub):
         print(f"Error fetching user signals with performance: {e}")
         traceback.print_exc()
         return jsonify({"error": "Failed to fetch signals"}), 500
+
+# Add these routes to your application.py file
+
+@application.route("/api/signals/performance/all", methods=["GET"])
+def get_all_signal_performance():
+    """
+    Fetch ALL performance data from signal_performance table.
+    Returns all completed signals regardless of watchlist.
+    """
+    try:
+        limit = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+        
+        with get_session_context() as session:
+            # Get total count
+            total_count = session.query(SignalPerformance).count()
+            
+            # Fetch performance records with limit/offset
+            performances = session.query(SignalPerformance).order_by(
+                SignalPerformance.tracked_at.desc()
+            ).limit(limit).offset(offset).all()
+            
+            if not performances:
+                return jsonify({
+                    "message": "No performance data found",
+                    "data": [],
+                    "pagination": {
+                        "total": total_count,
+                        "limit": limit,
+                        "offset": offset,
+                        "has_more": False
+                    }
+                }), 200
+
+            result = []
+            for perf in performances:
+                # Join with Signal table to get symbol
+                signal = session.query(Signal).filter_by(id=perf.signal_id).first()
+                
+                result.append({
+                    "performance_id": perf.id,
+                    "signal_id": perf.signal_id,
+                    "symbol": signal.symbol if signal else "UNKNOWN",
+                    "entry_price": float(signal.payload.get("price")) if signal and signal.payload else None,
+                    "exit_price": float(perf.exit_price) if perf.exit_price else None,
+                    "exit_reason": perf.exit_reason,  # TP / SL / TIME
+                    "result": perf.result,  # SUCCESS / FAILURE
+                    "return_percent": float(perf.return_percent) if perf.return_percent else None,
+                    "profit_usd": float(perf.profit_usd) if perf.profit_usd else None,
+                    "duration_minutes": perf.duration_minutes,
+                    "tracked_at": perf.tracked_at.isoformat() if perf.tracked_at else None
+                })
+
+            return jsonify({
+                "data": result,
+                "pagination": {
+                    "total": total_count,
+                    "limit": limit,
+                    "offset": offset,
+                    "has_more": offset + limit < total_count
+                }
+            }), 200
+
+    except Exception as e:
+        print(f"Error fetching all signal performance: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@application.route("/api/signals/performance/user/<user_sub>", methods=["GET"])
+def get_user_signal_performance_direct(user_sub):
+    """
+    Fetch performance data for a specific user's signals.
+    Queries signal_performance table directly based on user's signals.
+    Does NOT depend on watchlist.
+    """
+    try:
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+        
+        with get_session_context() as session:
+            # Get all signals created by/for this user
+            user_signals = session.query(UserSignal).filter_by(
+                user_sub=user_sub
+            ).all()
+            
+            if not user_signals:
+                return jsonify({
+                    "message": "No signals found for this user",
+                    "data": [],
+                    "pagination": {
+                        "total": 0,
+                        "limit": limit,
+                        "offset": offset,
+                        "has_more": False
+                    }
+                }), 200
+            
+            signal_ids = [us.signal_id for us in user_signals]
+            
+            # Get performance records for these signals
+            total_count = session.query(SignalPerformance).filter(
+                SignalPerformance.signal_id.in_(signal_ids)
+            ).count()
+            
+            performances = session.query(SignalPerformance).filter(
+                SignalPerformance.signal_id.in_(signal_ids)
+            ).order_by(
+                SignalPerformance.tracked_at.desc()
+            ).limit(limit).offset(offset).all()
+
+            result = []
+            for perf in performances:
+                signal = session.query(Signal).filter_by(id=perf.signal_id).first()
+                
+                result.append({
+                    "performance_id": perf.id,
+                    "signal_id": perf.signal_id,
+                    "symbol": signal.symbol if signal else "UNKNOWN",
+                    "entry_price": float(signal.payload.get("price")) if signal and signal.payload else None,
+                    "exit_price": float(perf.exit_price) if perf.exit_price else None,
+                    "exit_reason": perf.exit_reason,
+                    "result": perf.result,
+                    "return_percent": float(perf.return_percent) if perf.return_percent else None,
+                    "profit_usd": float(perf.profit_usd) if perf.profit_usd else None,
+                    "duration_minutes": perf.duration_minutes,
+                    "tracked_at": perf.tracked_at.isoformat() if perf.tracked_at else None
+                })
+
+            return jsonify({
+                "data": result,
+                "pagination": {
+                    "total": total_count,
+                    "limit": limit,
+                    "offset": offset,
+                    "has_more": offset + limit < total_count
+                }
+            }), 200
+
+    except Exception as e:
+        print(f"Error fetching user signal performance: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@application.route("/api/signals/performance/stats/<user_sub>", methods=["GET"])
+def get_user_performance_stats(user_sub):
+    """
+    Get aggregated performance statistics for a user.
+    Calculate win rate, avg return, total P&L, etc.
+    """
+    try:
+        with get_session_context() as session:
+            # Get user's signals
+            user_signals = session.query(UserSignal).filter_by(
+                user_sub=user_sub
+            ).all()
+            
+            if not user_signals:
+                return jsonify({
+                    "stats": {
+                        "total_signals": 0,
+                        "success_count": 0,
+                        "failure_count": 0,
+                        "pending_count": 0,
+                        "win_rate": 0,
+                        "avg_return": 0,
+                        "total_profit": 0,
+                        "total_loss": 0,
+                        "net_pnl": 0,
+                        "best_trade": 0,
+                        "worst_trade": 0,
+                        "avg_duration_minutes": 0
+                    }
+                }), 200
+            
+            signal_ids = [us.signal_id for us in user_signals]
+            
+            # Get all performances
+            performances = session.query(SignalPerformance).filter(
+                SignalPerformance.signal_id.in_(signal_ids)
+            ).all()
+            
+            if not performances:
+                return jsonify({
+                    "stats": {
+                        "total_signals": len(user_signals),
+                        "success_count": 0,
+                        "failure_count": 0,
+                        "pending_count": len(user_signals),
+                        "win_rate": 0,
+                        "avg_return": 0,
+                        "total_profit": 0,
+                        "total_loss": 0,
+                        "net_pnl": 0,
+                        "best_trade": 0,
+                        "worst_trade": 0,
+                        "avg_duration_minutes": 0
+                    }
+                }), 200
+            
+            # Calculate statistics
+            success_count = sum(1 for p in performances if p.result == "SUCCESS")
+            failure_count = sum(1 for p in performances if p.result == "FAILURE")
+            pending_count = len(user_signals) - len(performances)
+            
+            returns = [float(p.return_percent) if p.return_percent else 0 for p in performances]
+            profits = [float(p.profit_usd) if p.profit_usd else 0 for p in performances]
+            durations = [p.duration_minutes for p in performances if p.duration_minutes]
+            
+            win_rate = (success_count / len(performances) * 100) if performances else 0
+            avg_return = sum(returns) / len(returns) if returns else 0
+            total_profit = sum(p for p in profits if p > 0)
+            total_loss = sum(abs(p) for p in profits if p < 0)
+            net_pnl = total_profit - total_loss
+            best_trade = max(returns) if returns else 0
+            worst_trade = min(returns) if returns else 0
+            avg_duration = sum(durations) / len(durations) if durations else 0
+            
+            return jsonify({
+                "stats": {
+                    "total_signals": len(user_signals),
+                    "completed_signals": len(performances),
+                    "success_count": success_count,
+                    "failure_count": failure_count,
+                    "pending_count": pending_count,
+                    "win_rate": round(win_rate, 2),
+                    "avg_return": round(avg_return, 2),
+                    "total_profit": round(total_profit, 2),
+                    "total_loss": round(total_loss, 2),
+                    "net_pnl": round(net_pnl, 2),
+                    "best_trade": round(best_trade, 2),
+                    "worst_trade": round(worst_trade, 2),
+                    "avg_duration_minutes": round(avg_duration, 2)
+                }
+            }), 200
+
+    except Exception as e:
+        print(f"Error fetching performance stats: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 def generate_presigned_url(bucket_name, object_key, expiration=3600):
     s3_client = boto3.client('s3')

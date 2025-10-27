@@ -5,6 +5,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, scoped_session
 from contextlib import contextmanager
+from datetime import datetime
 import os
 
 Base = declarative_base()
@@ -97,6 +98,41 @@ class SignalPerformance(Base):
     def __repr__(self):
         return (f"<SignalPerformance(signal_id={self.signal_id}, status={self.status}, "
                 f"exit_reason={self.exit_reason}, result={self.result}, return={self.return_percent}%)>")
+    
+class Review(Base):
+    """
+    User reviews table with admin verification
+    """
+    __tablename__ = "reviews"
+    
+    id = Column(Integer, primary_key=True)
+    user_sub = Column(String, ForeignKey("users.user_sub"), nullable=False, index=True)
+    email = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    rating = Column(Integer, nullable=False)  # 1-5 stars
+    comment = Column(String, nullable=False)
+    verified = Column(Boolean, default=False, nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationship back to User
+    user = relationship("User", backref="reviews")
+    
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_sub": self.user_sub,
+            "email": self.email,
+            "name": self.name,
+            "rating": self.rating,
+            "comment": self.comment,
+            "verified": self.verified,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None
+        }
+    
+    def __repr__(self):
+        return f"<Review(id={self.id}, name={self.name}, rating={self.rating}, verified={self.verified})>"
 
 
 class User(Base):
