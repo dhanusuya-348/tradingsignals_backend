@@ -20,7 +20,8 @@ CORS(application, resources={
         "origins": [
             "https://main.d2lu8gx2f335fg.amplifyapp.com",
             "https://dpz6hfs65cjkw.cloudfront.net",
-            "http://localhost:3000"
+            "http://localhost:3000",
+            "https://www.dollaraptor.com"
         ],
         "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization", "X-Amz-Date", "X-Api-Key"],
@@ -886,18 +887,32 @@ def get_all_signal_performance():
                 # Join with Signal table to get symbol
                 signal = session.query(Signal).filter_by(id=perf.signal_id).first()
                 
+                # Get entry price from signal payload
+                entry_price = None
+                created_at = None
+                
+                if signal:
+                    if signal.payload and 'price' in signal.payload:
+                        entry_price = float(signal.payload['price'])
+                    elif signal.payload and 'risk' in signal.payload and 'entry_price' in signal.payload['risk']:
+                        entry_price = float(signal.payload['risk']['entry_price'])
+                    
+                    # Get signal creation time
+                    created_at = signal.created_at.isoformat() if signal.created_at else None
+                
                 result.append({
                     "performance_id": perf.id,
                     "signal_id": perf.signal_id,
                     "symbol": signal.symbol if signal else "UNKNOWN",
-                    "entry_price": float(signal.payload.get("price")) if signal and signal.payload else None,
+                    "entry_price": entry_price,  # FIX: Now properly extracted
                     "exit_price": float(perf.exit_price) if perf.exit_price else None,
                     "exit_reason": perf.exit_reason,  # TP / SL / TIME
                     "result": perf.result,  # SUCCESS / FAILURE
                     "return_percent": float(perf.return_percent) if perf.return_percent else None,
                     "profit_usd": float(perf.profit_usd) if perf.profit_usd else None,
                     "duration_minutes": perf.duration_minutes,
-                    "tracked_at": perf.tracked_at.isoformat() if perf.tracked_at else None
+                    "tracked_at": perf.tracked_at.isoformat() if perf.tracked_at else None,
+                    "created_at": created_at  # FIX: Added this field
                 })
 
             return jsonify({
@@ -915,12 +930,13 @@ def get_all_signal_performance():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+# Add these UPDATED routes to your application.py file (replace the existing ones)
 
 @application.route("/api/signals/performance/user/<user_sub>", methods=["GET"])
 def get_user_signal_performance_direct(user_sub):
     """
     Fetch performance data for a specific user's signals.
-    Queries signal_performance table directly based on user's signals.
+    Includes timing data from the signals table.
     Does NOT depend on watchlist.
     """
     try:
@@ -962,6 +978,20 @@ def get_user_signal_performance_direct(user_sub):
             for perf in performances:
                 signal = session.query(Signal).filter_by(id=perf.signal_id).first()
                 
+                # Extract timing data from signal payload
+                start_time = None
+                end_time = None
+                created_at = None  # ADD THIS LINE
+                
+                if signal and signal.payload:
+                    timing = signal.payload.get('timing', {})
+                    start_time = timing.get('start')
+                    end_time = timing.get('end')
+                
+                # ADD THIS: Get created_at from Signal table
+                if signal:
+                    created_at = signal.created_at.isoformat() if signal.created_at else None
+                
                 result.append({
                     "performance_id": perf.id,
                     "signal_id": perf.signal_id,
@@ -973,7 +1003,10 @@ def get_user_signal_performance_direct(user_sub):
                     "return_percent": float(perf.return_percent) if perf.return_percent else None,
                     "profit_usd": float(perf.profit_usd) if perf.profit_usd else None,
                     "duration_minutes": perf.duration_minutes,
-                    "tracked_at": perf.tracked_at.isoformat() if perf.tracked_at else None
+                    "tracked_at": perf.tracked_at.isoformat() if perf.tracked_at else None,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "created_at": created_at  # ADD THIS LINE
                 })
 
             return jsonify({
@@ -990,7 +1023,6 @@ def get_user_signal_performance_direct(user_sub):
         print(f"Error fetching user signal performance: {e}")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
 
 @application.route("/api/signals/performance/stats/<user_sub>", methods=["GET"])
 def get_user_performance_stats(user_sub):
