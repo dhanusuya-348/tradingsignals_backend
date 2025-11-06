@@ -15,19 +15,25 @@ from botocore.exceptions import ClientError
 application = Flask(__name__)
 
 # Enable CORS for Amplify frontend
-CORS(application, resources={
-    r"/*": {
-        "origins": [
-            "https://main.d2lu8gx2f335fg.amplifyapp.com",
-            "https://dpz6hfs65cjkw.cloudfront.net",
-            "http://localhost:3000",
-            "https://www.dollaraptor.com"
-        ],
-        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization", "X-Amz-Date", "X-Api-Key"],
-        "supports_credentials": True
-    }
-})
+allowed_origins = [
+    "https://main.d2lu8gx2f335fg.amplifyapp.com",
+    "https://dpz6hfs65cjkw.cloudfront.net",
+    "http://localhost:3000",
+    "https://www.dollaraptor.com"
+]
+
+def get_origin():
+    origin = request.headers.get('Origin')
+    if origin in allowed_origins:
+        return origin
+    return None
+
+CORS(application, resources={r"/*": {
+    "origins": get_origin,
+    "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization", "X-Amz-Date", "X-Api-Key"],
+    "supports_credentials": True
+}})
 
 
 # Create tables at startup

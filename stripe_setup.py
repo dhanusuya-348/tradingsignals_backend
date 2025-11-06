@@ -125,7 +125,7 @@ STRIPE_WEBHOOK_SECRET=whsec_YOUR_WEBHOOK_SECRET_HERE
         env_key = f"PRICE_{key.upper()}"
         env_content += f"\n{env_key}={value}"
     
-    env_content += "\n\nFRONTEND_URL=https://main.d2lu8gx2f335fg.amplifyapp.com\n"
+    env_content += "\n\nFRONTEND_URL=https://www.dollaraptor.com\n"
     
     print(env_content)
     
