@@ -1,0 +1,12 @@
+{
+  "dolloraptor-api-backend-container": {
+    "image": "418272769848.dkr.ecr.ap-southeast-2.amazonaws.com/dolloraptor-api-backend:latest",
+    "ports": {
+      "8080": "HTTP"
+    },
+    "environment": {
+      "ENV": "prod",
+      "DEBUG": "false"
+    }
+  }
+}
