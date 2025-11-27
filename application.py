@@ -14,27 +14,20 @@ from botocore.exceptions import ClientError
 
 application = Flask(__name__)
 
-# Enable CORS for Amplify frontend
-allowed_origins = [
-    "https://main.d2lu8gx2f335fg.amplifyapp.com",
-    "https://dpz6hfs65cjkw.cloudfront.net",
-    "http://localhost:3000",
-    "https://www.dollaraptor.com"
-]
-
-def get_origin():
-    origin = request.headers.get('Origin')
-    if origin in allowed_origins:
-        return origin
-    return None
-
-CORS(application, resources={r"/*": {
-    "origins": get_origin,
-    "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    "allow_headers": ["Content-Type", "Authorization", "X-Amz-Date", "X-Api-Key"],
-    "supports_credentials": True
-}})
-
+# Enable CORS for your domains
+CORS(application, resources={
+    r"/*": {
+        "origins": [
+            "https://dollaraptor.com",          # Also add without www if needed
+            "http://localhost:3000",             # Local dev
+            "https://api.dollaraptor.com",
+            "https://signal.dollaraptor.com"
+        ],
+        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Amz-Date", "X-Api-Key"],
+        "supports_credentials": True
+    }
+})
 
 # Create tables at startup
 engine = get_engine_from_env()
@@ -361,6 +354,130 @@ def delete_review(review_id):
         print(f"Error deleting review: {e}")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+# ======================
+# CONTACT FORM ROUTES
+# ======================
+@application.route("/api/contact", methods=["POST"])
+def send_contact_email():
+    """Send contact form email via SES"""
+    try:
+        data = request.json or {}
+        firstName = data.get("firstName", "").strip()
+        lastName = data.get("lastName", "").strip()
+        email = data.get("email", "").strip()
+        phone = data.get("phone", "").strip()
+        subject = data.get("subject", "").strip()
+        message = data.get("message", "").strip()
+        
+        # Validate required fields
+        if not all([firstName, email, subject, message]):
+            return jsonify({"error": "Missing required fields"}), 400
+        
+        # Initialize SES client
+        ses_client = boto3.client(
+            'ses',
+            region_name=os.environ.get('AWS_REGION', 'ap-southeast-2'),
+            aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY')
+        )
+        
+        # Your verified email from environment
+        from_email = os.environ.get('SES_FROM_EMAIL', 'rkaydhanu@gmail.com')
+        
+        # HTML email body
+        html_body = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; background-color: #0f0f0f; color: #e0e0e0;">
+                <div style="max-width: 600px; margin: 0 auto; background-color: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 30px;">
+                    <h2 style="color: #06b6d4; margin-bottom: 20px;">📬 New Contact Form Submission</h2>
+                    
+                    <div style="background-color: #0f0f0f; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                        <p><strong style="color: #06b6d4;">Name:</strong> {firstName} {lastName}</p>
+                        <p><strong style="color: #06b6d4;">Email:</strong> <a href="mailto:{email}" style="color: #06b6d4;">{email}</a></p>
+                        <p><strong style="color: #06b6d4;">Phone:</strong> {phone if phone else 'Not provided'}</p>
+                        <p><strong style="color: #06b6d4;">Subject:</strong> {subject}</p>
+                    </div>
+                    
+                    <div style="background-color: #0f0f0f; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #06b6d4;">
+                        <h3 style="color: #06b6d4; margin-top: 0;">Message:</h3>
+                        <p style="white-space: pre-wrap; line-height: 1.6;">{message}</p>
+                    </div>
+                    
+                    <hr style="border: none; border-top: 1px solid #333; margin: 20px 0;">
+                    
+                    <p style="color: #999; font-size: 12px; margin: 0;">
+                        This is an automated message from DollaRaptor contact form.<br>
+                        <strong>Reply to:</strong> {email}
+                    </p>
+                </div>
+            </body>
+        </html>
+        """
+        
+        # Plain text fallback
+        text_body = f"""
+NEW CONTACT FORM SUBMISSION
+
+Name: {firstName} {lastName}
+Email: {email}
+Phone: {phone if phone else 'Not provided'}
+Subject: {subject}
+
+MESSAGE:
+{message}
+
+---
+This is an automated message from DollaRaptor contact form.
+Reply to: {email}
+        """
+        
+        # Send email via SES
+        response = ses_client.send_email(
+            Source=from_email,
+            Destination={
+                'ToAddresses': [from_email]
+            },
+            Message={
+                'Subject': {
+                    'Data': f'New Contact: {subject}',
+                    'Charset': 'UTF-8'
+                },
+                'Body': {
+                    'Html': {
+                        'Data': html_body,
+                        'Charset': 'UTF-8'
+                    },
+                    'Text': {
+                        'Data': text_body,
+                        'Charset': 'UTF-8'
+                    }
+                }
+            },
+            ReplyToAddresses=[email]
+        )
+        
+        print(f"✓ Email sent successfully. MessageId: {response['MessageId']}")
+        
+        return jsonify({
+            "ok": True,
+            "message": "Message sent successfully! We'll get back to you soon.",
+            "messageId": response['MessageId']
+        }), 200
+        
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        print(f"✗ AWS SES Error: {error_code} - {e.response['Error']['Message']}")
+        
+        if error_code == 'MessageRejected':
+            return jsonify({"error": "Email rejected. Please check your email address."}), 400
+        else:
+            return jsonify({"error": f"Email service error: {error_code}"}), 500
+            
+    except Exception as e:
+        print(f"✗ Error sending contact email: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Failed to send email. Please try again later."}), 500
 
 # ======================
 # PROFILE ROUTES

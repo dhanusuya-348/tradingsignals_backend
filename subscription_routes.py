@@ -14,7 +14,7 @@ import traceback
 # =====================
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://main.d2lu8gx2f335fg.amplifyapp.com", "https://www.dollaraptor.com")
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://dollaraptor.com")
 
 # Price IDs from Stripe Dashboard - these are the ACTUAL Stripe price IDs
 PRICE_IDS = {
