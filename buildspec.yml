@@ -21,6 +21,7 @@ phases:
       - printf '[{"containerName":"dolloraptor-api-backend-container","image":"418272769848.dkr.ecr.ap-southeast-2.amazonaws.com/dolloraptor-api-backend:latest"}]' > containers.json
 
       - echo Deploying to Lightsail...
+      - |
       - aws lightsail create-container-service-deployment \
           --service-name dolloraptor-api-backend-service \
           --containers file://containers.json \
