@@ -65,17 +65,26 @@ def add_cors_headers(response):
     origin = request.headers.get('Origin')
     
     allowed_origins = [
-        'https://main.d2lu8gx2f335fg.amplifyapp.com',
-        'http://localhost:3000'
+        'https://dollaraptor.com',
+        'http://localhost:3000',
+        'https://signal.dollaraptor.com'
     ]
     
     if origin in allowed_origins:
         response.headers['Access-Control-Allow-Origin'] = origin
-        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-        response.headers['Access-Control-Max-Age'] = '3600'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+    
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    response.headers['Access-Control-Max-Age'] = '3600'
     
     return response
+
+# Add OPTIONS handler
+@app.route('/<path:path>', methods=['OPTIONS'])
+def handle_options(path):
+    """Handle CORS preflight"""
+    return '', 204
 
 
 # ============================================================
