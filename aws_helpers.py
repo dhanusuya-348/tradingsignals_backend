@@ -5,7 +5,7 @@ import json
 import time
 from typing import Optional, Dict
 
-region = os.environ.get("AWS_REGION", "us-east-1")
+region = os.environ.get("AWS_REGION", "ap-southeast-2")
 
 # AWS clients
 sqs = boto3.client("sqs", region_name=region)
