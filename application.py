@@ -38,7 +38,9 @@ def after_request(response):
     allowed_origins = [
         'https://dollaraptor.com',
         'http://localhost:3000',
+        'http://api.dollaraptor.com',
         'https://api.dollaraptor.com',
+        'http://signal.dollaraptor.com',
         'https://signal.dollaraptor.com'
     ]
     
