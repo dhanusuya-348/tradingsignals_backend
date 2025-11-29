@@ -170,7 +170,7 @@ def format_signal_email(signal_data):
 
         <hr style="border:none; border-top:1px solid #eee; margin:20px 0;"/>
         <p style="font-size:13px; color:#777;">✅ Decision: <b>{decision}</b></p>
-        <p style="font-size:12px; color:#aaa; text-align:center; margin-bottom:10px;">DumbledoreCapital © 2025 | AI-Powered Crypto Insights</p>
+        <p style="font-size:12px; color:#aaa; text-align:center; margin-bottom:10px;">Dollaraptor © 2025 | AI-Powered Crypto Insights</p>
         <p style="font-size:11px; color:#999; text-align:center; background:#f9f9f9; padding:10px; border-radius:4px; border:1px solid #eee;"><b>⚠️ Risk Disclaimer:</b> This signal is for educational purposes only. Trading carries substantial risk. All trading decisions are made at your own will and discretion. We are not responsible for any losses incurred.</p>
       </div>
     </body>
