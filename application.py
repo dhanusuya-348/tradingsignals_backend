@@ -11,47 +11,66 @@ from algo.runner import generate_pdf_report_full
 from subscription_routes import register_subscription_routes
 import boto3
 from botocore.exceptions import ClientError
+from twitter_service import TwitterService
+
+# Initialize Twitter service (add at the top with other imports)
+twitter_service = None
+try:
+    twitter_service = TwitterService()
+    twitter_service.test_connection()
+except Exception as e:
+    print(f"⚠️  Twitter service not initialized: {e}")
 
 application = Flask(__name__)
 
-# Enable CORS for your domains
-CORS(application, resources={
-    r"/*": {
-        "origins": [
-            "https://dollaraptor.com",          # Also add without www if needed
-            "http://localhost:3000",             # Local dev
-            "https://api.dollaraptor.com",
-            "https://signal.dollaraptor.com"
-        ],
-        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization", "X-Amz-Date", "X-Api-Key"],
-        "supports_credentials": True
-    }
-})
+# =============================
+# FIXED CORS - CLEAN & SIMPLE
+# =============================
+# =============================
+# BULLETPROOF CORS - SPECIFIC ORIGINS
+# =============================
+ALLOWED_ORIGINS = [
+    'https://dollaraptor.com',
+    'https://www.dollaraptor.com',
+    'http://localhost:3000',
+    'https://api.dollaraptor.com',
+    'https://signal.dollaraptor.com'
+]
 
-# Add this AFTER CORS(application, ...) and BEFORE your routes
+CORS(application, resources={r"/*": {"origins": ALLOWED_ORIGINS}})
+
 @application.after_request
 def after_request(response):
-    """Force CORS headers on all responses"""
     origin = request.headers.get('Origin')
     
-    allowed_origins = [
-        'https://dollaraptor.com',
-        'http://localhost:3000',
-        'http://api.dollaraptor.com',
-        'https://api.dollaraptor.com',
-        'http://signal.dollaraptor.com',
-        'https://signal.dollaraptor.com'
-    ]
-    
-    if origin in allowed_origins:
+    # CRITICAL: Always add CORS headers, but validate the origin
+    if origin in ALLOWED_ORIGINS:
         response.headers['Access-Control-Allow-Origin'] = origin
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
+    else:
+        # Even for non-allowed origins, add basic headers to avoid browser errors
+        response.headers['Access-Control-Allow-Origin'] = ALLOWED_ORIGINS[0]
     
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-Amz-Date,X-Api-Key'
-    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Amz-Date, X-Api-Key, X-Requested-With'
     
     return response
+
+@application.route('/<path:path>', methods=['OPTIONS'])
+def handle_options(path):
+    response = jsonify({'status': 'ok'})
+    origin = request.headers.get('Origin')
+    
+    if origin in ALLOWED_ORIGINS:
+        response.headers['Access-Control-Allow-Origin'] = origin
+    else:
+        response.headers['Access-Control-Allow-Origin'] = ALLOWED_ORIGINS[0]
+    
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Amz-Date, X-Api-Key, X-Requested-With'
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    
+    return response, 204
 
 
 # Create tables at startup
@@ -62,17 +81,11 @@ Base.metadata.create_all(engine)
 pdf_generation_status = {}
 
 # ======================
-# HEALTH CHECK
+#     HEALTH CHECK
 # ======================
 @application.route("/health")
 def health():
     return {"status": "ok"}
-
-# Add this BEFORE all your other routes
-@application.route('/<path:path>', methods=['OPTIONS'])
-def handle_options(path):
-    """Handle CORS preflight"""
-    return '', 204
 
 # ======================
 # PDF GENERATION ROUTES
@@ -1381,6 +1394,181 @@ def pdf_status(user_signal_id):
         print(f"Error checking PDF status: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+# ======================
+# TWITTER/X POSTING ROUTES
+# ======================
+
+@application.route("/api/twitter/test", methods=["GET"])
+def test_twitter_connection():
+    """Test Twitter API connection"""
+    if not twitter_service:
+        return jsonify({"error": "Twitter service not initialized"}), 500
+    
+    is_connected = twitter_service.test_connection()
+    return jsonify({
+        "connected": is_connected,
+        "message": "Twitter API connection successful" if is_connected else "Twitter API connection failed"
+    })
+
+@application.route("/api/twitter/post-signal-performance", methods=["POST"])
+def post_signal_performance_twitter():
+    """
+    Automatically post a signal performance to Twitter.
+    Called after a signal completes (entry + exit recorded).
+    """
+    try:
+        if not twitter_service:
+            return jsonify({"error": "Twitter service not initialized"}), 500
+        
+        data = request.json or {}
+        
+        # Validate required fields
+        required = ['symbol', 'entry_price', 'exit_price', 'return_percent', 'profit_usd', 'result', 'duration_minutes']
+        if not all(field in data for field in required):
+            return jsonify({"error": f"Missing required fields: {required}"}), 400
+        
+        symbol = data.get('symbol')
+        entry_price = float(data.get('entry_price'))
+        exit_price = float(data.get('exit_price'))
+        return_percent = float(data.get('return_percent'))
+        profit_usd = float(data.get('profit_usd'))
+        result = data.get('result').upper()
+        duration_minutes = int(data.get('duration_minutes'))
+        
+        # Post to Twitter
+        tweet_id = twitter_service.post_signal_performance(
+            symbol=symbol,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            return_percent=return_percent,
+            profit_usd=profit_usd,
+            result=result,
+            duration_minutes=duration_minutes
+        )
+        
+        if tweet_id:
+            return jsonify({
+                "ok": True,
+                "message": "Signal performance posted to Twitter",
+                "tweet_id": tweet_id,
+                "tweet_url": f"https://twitter.com/YOUR_USERNAME/status/{tweet_id}"
+            }), 201
+        else:
+            return jsonify({"error": "Failed to post to Twitter"}), 500
+            
+    except Exception as e:
+        print(f"Error posting signal performance: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@application.route("/api/twitter/post-daily-summary", methods=["POST"])
+def post_daily_summary_twitter():
+    """
+    Post a daily performance summary to Twitter.
+    Call this once per day with aggregated stats.
+    """
+    try:
+        if not twitter_service:
+            return jsonify({"error": "Twitter service not initialized"}), 500
+        
+        data = request.json or {}
+        
+        required = ['total_signals', 'wins', 'losses', 'win_rate', 'total_profit', 'avg_return']
+        if not all(field in data for field in required):
+            return jsonify({"error": f"Missing required fields: {required}"}), 400
+        
+        tweet_id = twitter_service.post_daily_performance_summary(
+            total_signals=int(data.get('total_signals')),
+            wins=int(data.get('wins')),
+            losses=int(data.get('losses')),
+            win_rate=float(data.get('win_rate')),
+            total_profit=float(data.get('total_profit')),
+            avg_return=float(data.get('avg_return'))
+        )
+        
+        if tweet_id:
+            return jsonify({
+                "ok": True,
+                "message": "Daily summary posted to Twitter",
+                "tweet_id": tweet_id
+            }), 201
+        else:
+            return jsonify({"error": "Failed to post daily summary"}), 500
+            
+    except Exception as e:
+        print(f"Error posting daily summary: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@application.route("/api/twitter/post-weekly-results", methods=["POST"])
+def post_weekly_results_twitter():
+    """
+    Post weekly backtest results to Twitter.
+    """
+    try:
+        if not twitter_service:
+            return jsonify({"error": "Twitter service not initialized"}), 500
+        
+        data = request.json or {}
+        
+        required = ['week', 'total_trades', 'win_rate', 'total_pnl', 'best_trade', 'worst_trade']
+        if not all(field in data for field in required):
+            return jsonify({"error": f"Missing required fields: {required}"}), 400
+        
+        tweet_id = twitter_service.post_weekly_backtest_results(
+            week=data.get('week'),
+            total_trades=int(data.get('total_trades')),
+            win_rate=float(data.get('win_rate')),
+            total_pnl=float(data.get('total_pnl')),
+            best_trade=float(data.get('best_trade')),
+            worst_trade=float(data.get('worst_trade'))
+        )
+        
+        if tweet_id:
+            return jsonify({
+                "ok": True,
+                "message": "Weekly results posted to Twitter",
+                "tweet_id": tweet_id
+            }), 201
+        else:
+            return jsonify({"error": "Failed to post weekly results"}), 500
+            
+    except Exception as e:
+        print(f"Error posting weekly results: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@application.route("/api/twitter/post-custom", methods=["POST"])
+def post_custom_twitter():
+    """
+    Post a custom message to Twitter.
+    """
+    try:
+        if not twitter_service:
+            return jsonify({"error": "Twitter service not initialized"}), 500
+        
+        data = request.json or {}
+        message = data.get('message', '').strip()
+        
+        if not message:
+            return jsonify({"error": "Message is required"}), 400
+        
+        tweet_id = twitter_service.post_custom_message(message)
+        
+        if tweet_id:
+            return jsonify({
+                "ok": True,
+                "message": "Custom message posted to Twitter",
+                "tweet_id": tweet_id
+            }), 201
+        else:
+            return jsonify({"error": "Failed to post message"}), 500
+            
+    except Exception as e:
+        print(f"Error posting custom message: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 # ======================
 # SUBSCRIPTION ROUTES
