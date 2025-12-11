@@ -1,4 +1,15 @@
-# auto_twitter_poster.py
+else:
+                    print(f"[INFO] No signals found, sleeping...\n")
+        
+        except Exception as e:
+            print(f"[ERROR] Loop failed: {e}")
+            import traceback
+            traceback.print_exc()
+            # Wait longer on error to avoid hammering API
+            time.sleep(CHECK_INTERVAL * 2)
+            continue
+        
+        time.sleep(CHECK_INTERVAL)# auto_twitter_poster.py
 # Run this as a separate service (systemd, cronjob, or docker container)
 
 import sys
@@ -39,6 +50,7 @@ except Exception as e:
 # State file to track last posted signal
 STATE_FILE = "/tmp/twitter_poster_last_id.txt"
 CHECK_INTERVAL = 60  # Check every 60 seconds
+TWEET_DELAY = 5  # Seconds between tweets (avoid rate limit)
 
 def load_last_posted_id():
     """Load the ID of the last signal we posted to Twitter"""
@@ -340,8 +352,9 @@ def auto_post_signals():
                             save_last_posted_id(last_posted_id)
                             print(f"[SAVED] State: last_posted_id={last_posted_id}\n")
                             
-                            # Small delay between tweets
-                            time.sleep(2)
+                            # Delay between tweets (respect rate limits)
+                            print(f"[DELAY] ⏳ Waiting {TWEET_DELAY}s before next tweet...\n")
+                            time.sleep(TWEET_DELAY)
                         else:
                             # Stop processing on failure (will retry next loop)
                             print(f"[RETRY] Will retry this signal next loop\n")
