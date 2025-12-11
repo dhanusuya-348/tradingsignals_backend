@@ -1399,23 +1399,213 @@ def pdf_status(user_signal_id):
 # TWITTER/X POSTING ROUTES
 # ======================
 
+# @application.route("/api/twitter/test", methods=["GET"])
+# def test_twitter_connection():
+#     """Test Twitter API connection"""
+#     if not twitter_service:
+#         return jsonify({"error": "Twitter service not initialized"}), 500
+    
+#     is_connected = twitter_service.test_connection()
+#     return jsonify({
+#         "connected": is_connected,
+#         "message": "Twitter API connection successful" if is_connected else "Twitter API connection failed"
+#     })
+
+# @application.route("/api/twitter/post-signal-performance", methods=["POST"])
+# def post_signal_performance_twitter():
+#     """
+#     Automatically post a signal performance to Twitter.
+#     Called after a signal completes (entry + exit recorded).
+#     """
+#     try:
+#         if not twitter_service:
+#             return jsonify({"error": "Twitter service not initialized"}), 500
+        
+#         data = request.json or {}
+        
+#         # Validate required fields
+#         required = ['symbol', 'entry_price', 'exit_price', 'return_percent', 'profit_usd', 'result', 'duration_minutes']
+#         if not all(field in data for field in required):
+#             return jsonify({"error": f"Missing required fields: {required}"}), 400
+        
+#         symbol = data.get('symbol')
+#         entry_price = float(data.get('entry_price'))
+#         exit_price = float(data.get('exit_price'))
+#         return_percent = float(data.get('return_percent'))
+#         profit_usd = float(data.get('profit_usd'))
+#         result = data.get('result').upper()
+#         duration_minutes = int(data.get('duration_minutes'))
+        
+#         # Post to Twitter
+#         tweet_id = twitter_service.post_signal_performance(
+#             symbol=symbol,
+#             entry_price=entry_price,
+#             exit_price=exit_price,
+#             return_percent=return_percent,
+#             profit_usd=profit_usd,
+#             result=result,
+#             duration_minutes=duration_minutes
+#         )
+        
+#         if tweet_id:
+#             return jsonify({
+#                 "ok": True,
+#                 "message": "Signal performance posted to Twitter",
+#                 "tweet_id": tweet_id,
+#                 "tweet_url": f"https://twitter.com/@dollaraptor/status/{tweet_id}"
+#             }), 201
+#         else:
+#             return jsonify({"error": "Failed to post to Twitter"}), 500
+            
+#     except Exception as e:
+#         print(f"Error posting signal performance: {e}")
+#         traceback.print_exc()
+#         return jsonify({"error": str(e)}), 500
+
+# @application.route("/api/twitter/post-daily-summary", methods=["POST"])
+# def post_daily_summary_twitter():
+#     """
+#     Post a daily performance summary to Twitter.
+#     Call this once per day with aggregated stats.
+#     """
+#     try:
+#         if not twitter_service:
+#             return jsonify({"error": "Twitter service not initialized"}), 500
+        
+#         data = request.json or {}
+        
+#         required = ['total_signals', 'wins', 'losses', 'win_rate', 'total_profit', 'avg_return']
+#         if not all(field in data for field in required):
+#             return jsonify({"error": f"Missing required fields: {required}"}), 400
+        
+#         tweet_id = twitter_service.post_daily_performance_summary(
+#             total_signals=int(data.get('total_signals')),
+#             wins=int(data.get('wins')),
+#             losses=int(data.get('losses')),
+#             win_rate=float(data.get('win_rate')),
+#             total_profit=float(data.get('total_profit')),
+#             avg_return=float(data.get('avg_return'))
+#         )
+        
+#         if tweet_id:
+#             return jsonify({
+#                 "ok": True,
+#                 "message": "Daily summary posted to Twitter",
+#                 "tweet_id": tweet_id
+#             }), 201
+#         else:
+#             return jsonify({"error": "Failed to post daily summary"}), 500
+            
+#     except Exception as e:
+#         print(f"Error posting daily summary: {e}")
+#         traceback.print_exc()
+#         return jsonify({"error": str(e)}), 500
+
+# @application.route("/api/twitter/post-weekly-results", methods=["POST"])
+# def post_weekly_results_twitter():
+#     """
+#     Post weekly backtest results to Twitter.
+#     """
+#     try:
+#         if not twitter_service:
+#             return jsonify({"error": "Twitter service not initialized"}), 500
+        
+#         data = request.json or {}
+        
+#         required = ['week', 'total_trades', 'win_rate', 'total_pnl', 'best_trade', 'worst_trade']
+#         if not all(field in data for field in required):
+#             return jsonify({"error": f"Missing required fields: {required}"}), 400
+        
+#         tweet_id = twitter_service.post_weekly_backtest_results(
+#             week=data.get('week'),
+#             total_trades=int(data.get('total_trades')),
+#             win_rate=float(data.get('win_rate')),
+#             total_pnl=float(data.get('total_pnl')),
+#             best_trade=float(data.get('best_trade')),
+#             worst_trade=float(data.get('worst_trade'))
+#         )
+        
+#         if tweet_id:
+#             return jsonify({
+#                 "ok": True,
+#                 "message": "Weekly results posted to Twitter",
+#                 "tweet_id": tweet_id
+#             }), 201
+#         else:
+#             return jsonify({"error": "Failed to post weekly results"}), 500
+            
+#     except Exception as e:
+#         print(f"Error posting weekly results: {e}")
+#         traceback.print_exc()
+#         return jsonify({"error": str(e)}), 500
+
+# @application.route("/api/twitter/post-custom", methods=["POST"])
+# def post_custom_twitter():
+#     """
+#     Post a custom message to Twitter.
+#     """
+#     try:
+#         if not twitter_service:
+#             return jsonify({"error": "Twitter service not initialized"}), 500
+        
+#         data = request.json or {}
+#         message = data.get('message', '').strip()
+        
+#         if not message:
+#             return jsonify({"error": "Message is required"}), 400
+        
+#         tweet_id = twitter_service.post_custom_message(message)
+        
+#         if tweet_id:
+#             return jsonify({
+#                 "ok": True,
+#                 "message": "Custom message posted to Twitter",
+#                 "tweet_id": tweet_id
+#             }), 201
+#         else:
+#             return jsonify({"error": "Failed to post message"}), 500
+            
+#     except Exception as e:
+#         print(f"Error posting custom message: {e}")
+#         traceback.print_exc()
+#         return jsonify({"error": str(e)}), 500
+
+# Add these UPDATED routes to replace the existing Twitter routes in application.py
+
 @application.route("/api/twitter/test", methods=["GET"])
 def test_twitter_connection():
     """Test Twitter API connection"""
     if not twitter_service:
         return jsonify({"error": "Twitter service not initialized"}), 500
     
-    is_connected = twitter_service.test_connection()
-    return jsonify({
-        "connected": is_connected,
-        "message": "Twitter API connection successful" if is_connected else "Twitter API connection failed"
-    })
+    try:
+        is_connected = twitter_service.test_connection()
+        status = "connected" if is_connected else "failed"
+        
+        return jsonify({
+            "ok": is_connected,
+            "status": status,
+            "message": "Twitter API connection successful" if is_connected else "Twitter API connection failed"
+        }), 200 if is_connected else 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @application.route("/api/twitter/post-signal-performance", methods=["POST"])
 def post_signal_performance_twitter():
     """
-    Automatically post a signal performance to Twitter.
+    Manually post a signal performance to Twitter.
     Called after a signal completes (entry + exit recorded).
+    
+    Request body:
+    {
+        "symbol": "BTC",
+        "entry_price": 45000.50,
+        "exit_price": 46000.75,
+        "return_percent": 2.22,
+        "profit_usd": 50.00,
+        "result": "SUCCESS",
+        "duration_minutes": 45
+    }
     """
     try:
         if not twitter_service:
@@ -1425,18 +1615,29 @@ def post_signal_performance_twitter():
         
         # Validate required fields
         required = ['symbol', 'entry_price', 'exit_price', 'return_percent', 'profit_usd', 'result', 'duration_minutes']
-        if not all(field in data for field in required):
-            return jsonify({"error": f"Missing required fields: {required}"}), 400
+        missing = [f for f in required if f not in data]
         
-        symbol = data.get('symbol')
-        entry_price = float(data.get('entry_price'))
-        exit_price = float(data.get('exit_price'))
-        return_percent = float(data.get('return_percent'))
-        profit_usd = float(data.get('profit_usd'))
-        result = data.get('result').upper()
-        duration_minutes = int(data.get('duration_minutes'))
+        if missing:
+            return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
+        
+        try:
+            symbol = str(data.get('symbol')).upper()
+            entry_price = float(data.get('entry_price'))
+            exit_price = float(data.get('exit_price'))
+            return_percent = float(data.get('return_percent'))
+            profit_usd = float(data.get('profit_usd'))
+            result = str(data.get('result')).upper()
+            duration_minutes = int(data.get('duration_minutes'))
+            
+            # Validate result
+            if result not in ['SUCCESS', 'FAILURE']:
+                return jsonify({"error": "Result must be 'SUCCESS' or 'FAILURE'"}), 400
+            
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": f"Invalid data types: {str(e)}"}), 400
         
         # Post to Twitter
+        print(f"\n📡 API: Posting {symbol} {result} to Twitter...")
         tweet_id = twitter_service.post_signal_performance(
             symbol=symbol,
             entry_price=entry_price,
@@ -1448,17 +1649,19 @@ def post_signal_performance_twitter():
         )
         
         if tweet_id:
+            print(f"✅ API: Tweet posted! ID: {tweet_id}")
             return jsonify({
                 "ok": True,
                 "message": "Signal performance posted to Twitter",
-                "tweet_id": tweet_id,
-                "tweet_url": f"https://twitter.com/YOUR_USERNAME/status/{tweet_id}"
+                "tweet_id": str(tweet_id),
+                "tweet_url": f"https://x.com/dollaraptor/status/{tweet_id}"
             }), 201
         else:
+            print(f"❌ API: Failed to post tweet")
             return jsonify({"error": "Failed to post to Twitter"}), 500
             
     except Exception as e:
-        print(f"Error posting signal performance: {e}")
+        print(f"❌ API: Error posting signal performance: {e}")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
@@ -1466,7 +1669,16 @@ def post_signal_performance_twitter():
 def post_daily_summary_twitter():
     """
     Post a daily performance summary to Twitter.
-    Call this once per day with aggregated stats.
+    
+    Request body:
+    {
+        "total_signals": 5,
+        "wins": 3,
+        "losses": 2,
+        "win_rate": 60.0,
+        "total_profit": 250.50,
+        "avg_return": 5.01
+    }
     """
     try:
         if not twitter_service:
@@ -1475,29 +1687,43 @@ def post_daily_summary_twitter():
         data = request.json or {}
         
         required = ['total_signals', 'wins', 'losses', 'win_rate', 'total_profit', 'avg_return']
-        if not all(field in data for field in required):
-            return jsonify({"error": f"Missing required fields: {required}"}), 400
+        missing = [f for f in required if f not in data]
         
+        if missing:
+            return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
+        
+        try:
+            total_signals = int(data.get('total_signals'))
+            wins = int(data.get('wins'))
+            losses = int(data.get('losses'))
+            win_rate = float(data.get('win_rate'))
+            total_profit = float(data.get('total_profit'))
+            avg_return = float(data.get('avg_return'))
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": f"Invalid data types: {str(e)}"}), 400
+        
+        print(f"\n📡 API: Posting daily summary to Twitter...")
         tweet_id = twitter_service.post_daily_performance_summary(
-            total_signals=int(data.get('total_signals')),
-            wins=int(data.get('wins')),
-            losses=int(data.get('losses')),
-            win_rate=float(data.get('win_rate')),
-            total_profit=float(data.get('total_profit')),
-            avg_return=float(data.get('avg_return'))
+            total_signals=total_signals,
+            wins=wins,
+            losses=losses,
+            win_rate=win_rate,
+            total_profit=total_profit,
+            avg_return=avg_return
         )
         
         if tweet_id:
+            print(f"✅ API: Daily summary posted! ID: {tweet_id}")
             return jsonify({
                 "ok": True,
                 "message": "Daily summary posted to Twitter",
-                "tweet_id": tweet_id
+                "tweet_id": str(tweet_id)
             }), 201
         else:
             return jsonify({"error": "Failed to post daily summary"}), 500
             
     except Exception as e:
-        print(f"Error posting daily summary: {e}")
+        print(f"❌ API: Error posting daily summary: {e}")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
@@ -1505,6 +1731,16 @@ def post_daily_summary_twitter():
 def post_weekly_results_twitter():
     """
     Post weekly backtest results to Twitter.
+    
+    Request body:
+    {
+        "week": "Week 1 Dec 2024",
+        "total_trades": 15,
+        "win_rate": 65.0,
+        "total_pnl": 500.75,
+        "best_trade": 8.50,
+        "worst_trade": -3.20
+    }
     """
     try:
         if not twitter_service:
@@ -1513,29 +1749,43 @@ def post_weekly_results_twitter():
         data = request.json or {}
         
         required = ['week', 'total_trades', 'win_rate', 'total_pnl', 'best_trade', 'worst_trade']
-        if not all(field in data for field in required):
-            return jsonify({"error": f"Missing required fields: {required}"}), 400
+        missing = [f for f in required if f not in data]
         
+        if missing:
+            return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
+        
+        try:
+            week = str(data.get('week'))
+            total_trades = int(data.get('total_trades'))
+            win_rate = float(data.get('win_rate'))
+            total_pnl = float(data.get('total_pnl'))
+            best_trade = float(data.get('best_trade'))
+            worst_trade = float(data.get('worst_trade'))
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": f"Invalid data types: {str(e)}"}), 400
+        
+        print(f"\n📡 API: Posting weekly results to Twitter...")
         tweet_id = twitter_service.post_weekly_backtest_results(
-            week=data.get('week'),
-            total_trades=int(data.get('total_trades')),
-            win_rate=float(data.get('win_rate')),
-            total_pnl=float(data.get('total_pnl')),
-            best_trade=float(data.get('best_trade')),
-            worst_trade=float(data.get('worst_trade'))
+            week=week,
+            total_trades=total_trades,
+            win_rate=win_rate,
+            total_pnl=total_pnl,
+            best_trade=best_trade,
+            worst_trade=worst_trade
         )
         
         if tweet_id:
+            print(f"✅ API: Weekly results posted! ID: {tweet_id}")
             return jsonify({
                 "ok": True,
                 "message": "Weekly results posted to Twitter",
-                "tweet_id": tweet_id
+                "tweet_id": str(tweet_id)
             }), 201
         else:
             return jsonify({"error": "Failed to post weekly results"}), 500
             
     except Exception as e:
-        print(f"Error posting weekly results: {e}")
+        print(f"❌ API: Error posting weekly results: {e}")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
@@ -1543,30 +1793,43 @@ def post_weekly_results_twitter():
 def post_custom_twitter():
     """
     Post a custom message to Twitter.
+    Max 280 characters.
+    
+    Request body:
+    {
+        "message": "Your custom message here"
+    }
     """
     try:
         if not twitter_service:
             return jsonify({"error": "Twitter service not initialized"}), 500
         
         data = request.json or {}
-        message = data.get('message', '').strip()
+        message = str(data.get('message', '')).strip()
         
         if not message:
             return jsonify({"error": "Message is required"}), 400
         
+        if len(message) > 280:
+            return jsonify({
+                "error": f"Message too long ({len(message)} chars). Max 280 characters."
+            }), 400
+        
+        print(f"\n📡 API: Posting custom message to Twitter...")
         tweet_id = twitter_service.post_custom_message(message)
         
         if tweet_id:
+            print(f"✅ API: Custom message posted! ID: {tweet_id}")
             return jsonify({
                 "ok": True,
                 "message": "Custom message posted to Twitter",
-                "tweet_id": tweet_id
+                "tweet_id": str(tweet_id)
             }), 201
         else:
             return jsonify({"error": "Failed to post message"}), 500
             
     except Exception as e:
-        print(f"Error posting custom message: {e}")
+        print(f"❌ API: Error posting custom message: {e}")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
