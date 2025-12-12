@@ -3,7 +3,7 @@
 # This version:
 # - Only posts signals 5+ hours old
 # - Respects rate limits with smart backoff
-# - Starts fresh (ignores past signals)
+# - Starts fresh from Dec 12 02:30 UTC (ignores older signals)
 # - Has delays between tweets to avoid API limits
 
 import sys
@@ -44,6 +44,42 @@ RATE_LIMIT_FILE = "/tmp/twitter_rate_limit.txt"
 CHECK_INTERVAL = 120  # Check every 2 minutes
 MIN_DELAY_BETWEEN_TWEETS = 8  # 8 seconds between tweets (safe margin)
 MIN_SIGNAL_AGE_HOURS = 5  # Only post signals 5+ hours old
+CUTOFF_DATE = datetime(2025, 12, 12, 2, 30, 0)  # Dec 12 02:30 UTC - START FRESH FROM HERE
+
+def initialize_last_posted_id():
+    """
+    Initialize the last posted ID by finding the highest signal ID 
+    created BEFORE the cutoff date. This ensures we skip all old signals.
+    """
+    try:
+        with open(STATE_FILE, "r") as f:
+            saved_id = int(f.read().strip())
+            if saved_id > 0:
+                print(f"[INIT] Using saved last_posted_id: {saved_id}")
+                return saved_id
+    except:
+        pass
+    
+    # Find highest signal ID before cutoff
+    print(f"[INIT] Finding highest signal ID before {CUTOFF_DATE}...")
+    try:
+        with get_session_context() as session:
+            old_signal = session.query(Signal.id)\
+                .filter(Signal.created_at < CUTOFF_DATE)\
+                .order_by(Signal.id.desc())\
+                .first()
+            
+            if old_signal:
+                max_old_id = old_signal[0]
+                print(f"[INIT] Found max old signal ID: {max_old_id}")
+                save_last_posted_id(max_old_id)
+                return max_old_id
+            else:
+                print(f"[INIT] No signals before cutoff, starting from 0")
+                return 0
+    except Exception as e:
+        print(f"[INIT] Error finding cutoff: {e}, defaulting to 0")
+        return 0
 
 def load_last_posted_id():
     """Load the ID of the last signal we posted to Twitter"""
@@ -189,17 +225,18 @@ def post_to_twitter(signal_data):
 def auto_post_signals():
     """
     Main loop: Find completed signals and post them to Twitter.
-    Only posts signals that are 5+ hours old.
+    Only posts signals that are 5+ hours old AND created after Dec 12 02:30 UTC.
     Respects rate limits with smart backoff.
     """
     print(f"[{datetime.utcnow()}] 🚀 Twitter Auto-Poster started")
+    print(f"[CONFIG] Cutoff date (ignore before): {CUTOFF_DATE} UTC")
     print(f"[CONFIG] Minimum signal age: {MIN_SIGNAL_AGE_HOURS} hours")
     print(f"[CONFIG] Check interval: {CHECK_INTERVAL} seconds")
     print(f"[CONFIG] Delay between tweets: {MIN_DELAY_BETWEEN_TWEETS} seconds\n")
     
-    last_posted_id = load_last_posted_id()
-    print(f"[STARTUP] Last posted signal ID: {last_posted_id}")
-    print(f"[STARTUP] Starting fresh from now onwards\n")
+    # Initialize - find cutoff point on first run
+    last_posted_id = initialize_last_posted_id()
+    print(f"[STARTUP] Starting from signal ID: {last_posted_id}\n")
     
     while True:
         try:
@@ -215,20 +252,24 @@ def auto_post_signals():
             now = datetime.utcnow()
             min_age_threshold = now - timedelta(hours=MIN_SIGNAL_AGE_HOURS)
             
-            print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] 🔍 Scanning for signals older than {MIN_SIGNAL_AGE_HOURS}h...")
+            print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] 🔍 Scanning for signals...")
+            print(f"[FILTER] Created after: {CUTOFF_DATE}")
+            print(f"[FILTER] Older than: {min_age_threshold}\n")
             
             with get_session_context() as session:
                 # Find signals that:
                 # 1. Are 5+ hours old
-                # 2. Have performance data (completed)
-                # 3. Haven't been posted yet
+                # 2. Created AFTER Dec 12 02:30 UTC (ignore old signals)
+                # 3. Have performance data (completed)
+                # 4. Haven't been posted yet
                 
                 completed_perfs = session.query(SignalPerformance)\
                     .join(Signal, Signal.id == SignalPerformance.signal_id)\
+                    .filter(Signal.created_at >= CUTOFF_DATE)\
                     .filter(Signal.created_at <= min_age_threshold)\
                     .filter(SignalPerformance.id > last_posted_id)\
                     .order_by(SignalPerformance.id.asc())\
-                    .limit(3)\
+                    .limit(1)\
                     .all()
                 
                 if completed_perfs:
