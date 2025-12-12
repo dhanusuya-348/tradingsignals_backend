@@ -35,6 +35,7 @@ except Exception as e:
 # State file to track last posted signal
 STATE_FILE = "/tmp/twitter_poster_last_id.txt"
 CHECK_INTERVAL = 60  # Check every 60 seconds
+RATE_LIMITED_INTERVAL = 900  # 15 minutes when rate limited
 
 def load_last_posted_id():
     """Load the ID of the last signal we posted to Twitter"""
@@ -179,11 +180,16 @@ def auto_post_signals():
                             save_last_posted_id(last_posted_id)
                             print(f"[SAVED] State: last_posted_id={last_posted_id}\n")
                             
-                            # Small delay between tweets
-                            time.sleep(2)
+                            # Delay between tweets to avoid rate limits
+                            time.sleep(5)
                         else:
                             # Stop processing on failure (will retry next loop)
                             print(f"[RETRY] Will retry this signal next loop\n")
+                            # If rate limited, wait longer before next check
+                            if hasattr(twitter_service, 'rate_limit_reset') and twitter_service.rate_limit_reset > time.time():
+                                remaining = twitter_service.rate_limit_reset - time.time()
+                                print(f"[RATE_LIMITED] Sleeping for {remaining/60:.1f} minutes...")
+                                time.sleep(min(remaining, RATE_LIMITED_INTERVAL))
                             break
                 else:
                     print(f"[INFO] No signals found, sleeping...\n")
@@ -193,7 +199,14 @@ def auto_post_signals():
             import traceback
             traceback.print_exc()
         
-        time.sleep(CHECK_INTERVAL)
+        # Adjust sleep interval based on rate limiting
+        sleep_interval = CHECK_INTERVAL
+        if twitter_service and hasattr(twitter_service, 'rate_limit_reset') and twitter_service.rate_limit_reset > time.time():
+            remaining = twitter_service.rate_limit_reset - time.time()
+            sleep_interval = min(remaining, RATE_LIMITED_INTERVAL)
+            print(f"[RATE_LIMITED] Next check in {sleep_interval/60:.1f} minutes...")
+        
+        time.sleep(sleep_interval)
 
 if __name__ == "__main__":
     auto_post_signals()
