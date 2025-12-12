@@ -51,7 +51,6 @@ class TwitterService:
             # Start with 15 minutes, then exponential backoff
             wait_time = 900  # 15 minutes
             print(f"🚫 Rate limit hit! Waiting {wait_time/60:.1f} minutes...")
-            time.sleep(wait_time)
             self.rate_limit_reset = time.time() + wait_time
             return True
         return False
