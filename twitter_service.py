@@ -33,6 +33,25 @@ class TwitterService:
             bearer_token=self.bearer_token
         )
     
+    def html_to_image_via_pillow(self, html_content: str, output_path: str) -> bool:
+        """
+        Convert HTML to PNG using Pillow + imgkit (lightweight alternative).
+        Fallback if Playwright fails.
+        """
+        try:
+            import imgkit
+            # Convert HTML string to image
+            options = {
+                'width': 1200,
+                'height': 630,
+                'quiet': ''
+            }
+            imgkit.from_string(html_content, output_path, options=options)
+            return True
+        except Exception as e:
+            print(f"[IMAGE] ❌ Pillow conversion failed: {e}")
+            return False
+    
     async def html_to_image_async(self, html_content: str, output_path: str) -> bool:
         """
         Convert HTML to PNG image using Playwright.
@@ -42,14 +61,12 @@ class TwitterService:
             from playwright.async_api import async_playwright
             
             async with async_playwright() as p:
-                browser = await p.chromium.launch()
+                # Use firefox which is lighter than chromium
+                browser = await p.firefox.launch(args=['--disable-gpu', '--no-sandbox'])
                 page = await browser.new_page(viewport={"width": 1200, "height": 630})
                 
                 # Set the HTML content
-                await page.set_content(html_content)
-                
-                # Wait for any fonts to load
-                await page.wait_for_load_state("networkidle")
+                await page.set_content(html_content, wait_until='networkidle')
                 
                 # Take screenshot
                 await page.screenshot(path=output_path, full_page=False)
@@ -57,8 +74,10 @@ class TwitterService:
                 await browser.close()
                 return True
         except Exception as e:
-            print(f"[IMAGE] ❌ Failed to convert HTML to image: {e}")
-            return False
+            print(f"[IMAGE] ⚠️  Playwright failed: {e}")
+            # Fallback to Pillow
+            print(f"[IMAGE] 🔄 Trying Pillow fallback...")
+            return self.html_to_image_via_pillow(html_content, output_path)
     
     def html_to_image(self, html_content: str, output_path: str) -> bool:
         """
@@ -113,8 +132,17 @@ class TwitterService:
             success = self.html_to_image(image_html, temp_image_path)
             
             if not success or not os.path.exists(temp_image_path):
-                print(f"[IMAGE] ❌ Failed to create image")
-                return None
+                print(f"[IMAGE] ❌ Failed to create image, posting text-only fallback...")
+                # Fall back to text-only post
+                return self.post_signal_performance(
+                    symbol=symbol,
+                    entry_price=entry_price,
+                    exit_price=exit_price,
+                    return_percent=return_percent,
+                    profit_usd=profit_usd,
+                    result=result,
+                    duration_minutes=duration_minutes
+                )
             
             print(f"[IMAGE] ✅ Image created: {temp_image_path}")
             
