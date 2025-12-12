@@ -1,7 +1,6 @@
 #twitter_service.py
 import tweepy
 import os
-import time
 from datetime import datetime
 from typing import Optional
 
@@ -12,9 +11,6 @@ class TwitterService:
     """
     
     def __init__(self):
-        self.last_post_time = 0
-        self.min_interval = 60  # Minimum 60 seconds between posts
-        self.rate_limit_reset = 0
         """Initialize Twitter API client with credentials from .env"""
         self.api_key = os.getenv('TWITTER_API_KEY')
         self.api_secret = os.getenv('TWITTER_API_SECRET')
@@ -34,26 +30,6 @@ class TwitterService:
             access_token_secret=self.access_token_secret,
             bearer_token=self.bearer_token
         )
-    
-    def _wait_for_rate_limit(self):
-        """Wait if we're posting too frequently"""
-        current_time = time.time()
-        time_since_last = current_time - self.last_post_time
-        
-        if time_since_last < self.min_interval:
-            wait_time = self.min_interval - time_since_last
-            print(f"⏳ Rate limiting: waiting {wait_time:.1f}s...")
-            time.sleep(wait_time)
-    
-    def _handle_rate_limit_error(self, error):
-        """Handle 429 rate limit errors with exponential backoff"""
-        if "429" in str(error) or "Too Many Requests" in str(error):
-            # Start with 15 minutes, then exponential backoff
-            wait_time = 900  # 15 minutes
-            print(f"🚫 Rate limit hit! Waiting {wait_time/60:.1f} minutes...")
-            self.rate_limit_reset = time.time() + wait_time
-            return True
-        return False
     
     def post_signal_performance(
         self, 
@@ -80,15 +56,6 @@ class TwitterService:
         Returns:
             Tweet ID if successful, None if failed
         """
-        # Check if we're still in rate limit cooldown
-        if time.time() < self.rate_limit_reset:
-            remaining = self.rate_limit_reset - time.time()
-            print(f"⏳ Still in rate limit cooldown: {remaining/60:.1f} minutes remaining")
-            return None
-        
-        # Wait for rate limiting
-        self._wait_for_rate_limit()
-        
         try:
             # Determine emoji and tone based on result
             emoji = "✅" if result == "SUCCESS" else "❌"
@@ -115,16 +82,11 @@ Result: {result_text}
             response = self.client.create_tweet(text=tweet_text)
             tweet_id = response.data['id']
             
-            # Update last post time on success
-            self.last_post_time = time.time()
             print(f"✅ Tweet posted successfully! ID: {tweet_id}")
             return tweet_id
             
         except Exception as e:
             print(f"❌ Error posting to Twitter: {e}")
-            # Handle rate limiting
-            if self._handle_rate_limit_error(e):
-                return None  # Will retry later
             return None
     
     def post_daily_performance_summary(
@@ -150,11 +112,6 @@ Result: {result_text}
         Returns:
             Tweet ID if successful, None if failed
         """
-        if time.time() < self.rate_limit_reset:
-            return None
-        
-        self._wait_for_rate_limit()
-        
         try:
             emoji = "🚀" if win_rate > 60 else "📊"
             
@@ -176,13 +133,11 @@ Keep watching for next 5h+ delayed signals...
             response = self.client.create_tweet(text=tweet_text)
             tweet_id = response.data['id']
             
-            self.last_post_time = time.time()
             print(f"✅ Daily summary posted! ID: {tweet_id}")
             return tweet_id
             
         except Exception as e:
             print(f"❌ Error posting daily summary: {e}")
-            self._handle_rate_limit_error(e)
             return None
     
     def post_weekly_backtest_results(
@@ -208,11 +163,6 @@ Keep watching for next 5h+ delayed signals...
         Returns:
             Tweet ID if successful, None if failed
         """
-        if time.time() < self.rate_limit_reset:
-            return None
-        
-        self._wait_for_rate_limit()
-        
         try:
             performance_emoji = "🔥" if total_pnl > 500 else "📈" if total_pnl > 0 else "📉"
             
@@ -234,13 +184,11 @@ Detailed analysis on dashboard 👉 dollaraptor.com
             response = self.client.create_tweet(text=tweet_text)
             tweet_id = response.data['id']
             
-            self.last_post_time = time.time()
             print(f"✅ Weekly results posted! ID: {tweet_id}")
             return tweet_id
             
         except Exception as e:
             print(f"❌ Error posting weekly results: {e}")
-            self._handle_rate_limit_error(e)
             return None
     
     def post_custom_message(self, message: str) -> Optional[str]:
@@ -253,11 +201,6 @@ Detailed analysis on dashboard 👉 dollaraptor.com
         Returns:
             Tweet ID if successful, None if failed
         """
-        if time.time() < self.rate_limit_reset:
-            return None
-        
-        self._wait_for_rate_limit()
-        
         try:
             if len(message) > 280:
                 print(f"⚠️ Message is {len(message)} characters (max 280). Truncating...")
@@ -266,13 +209,11 @@ Detailed analysis on dashboard 👉 dollaraptor.com
             response = self.client.create_tweet(text=message)
             tweet_id = response.data['id']
             
-            self.last_post_time = time.time()
             print(f"✅ Custom tweet posted! ID: {tweet_id}")
             return tweet_id
             
         except Exception as e:
             print(f"❌ Error posting custom message: {e}")
-            self._handle_rate_limit_error(e)
             return None
     
     def test_connection(self) -> bool:
