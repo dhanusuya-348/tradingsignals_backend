@@ -1,15 +1,14 @@
 import tweepy
 import os
-import asyncio
-import tempfile
+import time
 from datetime import datetime
 from typing import Optional
-from pathlib import Path
 
 class TwitterService:
     """
     Service to handle Twitter/X.com automated posting
     for signal performance updates and summaries.
+    Includes rate limit handling with exponential backoff.
     """
     
     def __init__(self):
@@ -32,68 +31,75 @@ class TwitterService:
             access_token_secret=self.access_token_secret,
             bearer_token=self.bearer_token
         )
+        
+        # Rate limit tracking
+        self.rate_limit_reset = None
+        self.requests_remaining = None
     
-    def html_to_image_via_pillow(self, html_content: str, output_path: str) -> bool:
+    def _handle_rate_limit(self, error_response):
         """
-        Convert HTML to PNG using Pillow + imgkit (lightweight alternative).
-        Fallback if Playwright fails.
+        Extract rate limit info from error response and wait appropriately.
         """
         try:
-            import imgkit
-            # Convert HTML string to image
-            options = {
-                'width': 1200,
-                'height': 630,
-                'quiet': ''
-            }
-            imgkit.from_string(html_content, output_path, options=options)
-            return True
+            # Check if this is a rate limit error (429)
+            if hasattr(error_response, 'response'):
+                headers = error_response.response.headers
+                if 'x-rate-limit-reset' in headers:
+                    reset_timestamp = int(headers['x-rate-limit-reset'])
+                    current_time = int(time.time())
+                    wait_seconds = max(reset_timestamp - current_time, 0)
+                    
+                    print(f"\n⏸️  RATE LIMIT HIT!")
+                    print(f"   Reset at: {datetime.fromtimestamp(reset_timestamp)}")
+                    print(f"   Waiting {wait_seconds} seconds...\n")
+                    
+                    time.sleep(wait_seconds + 2)  # Add 2 second buffer
+                    return True
         except Exception as e:
-            print(f"[IMAGE] ❌ Pillow conversion failed: {e}")
-            return False
+            print(f"[DEBUG] Error extracting rate limit: {e}")
+        
+        return False
     
-    async def html_to_image_async(self, html_content: str, output_path: str) -> bool:
+    def _make_request_with_backoff(self, request_func, *args, **kwargs):
         """
-        Convert HTML to PNG image using Playwright.
-        Returns True if successful.
+        Make a request with exponential backoff for rate limits.
+        
+        Args:
+            request_func: The API call function
+            *args, **kwargs: Arguments to pass to request_func
+        
+        Returns:
+            Response from API or None if failed
         """
-        try:
-            from playwright.async_api import async_playwright
-            
-            async with async_playwright() as p:
-                # Use firefox which is lighter than chromium
-                browser = await p.firefox.launch(args=['--disable-gpu', '--no-sandbox'])
-                page = await browser.new_page(viewport={"width": 1200, "height": 630})
-                
-                # Set the HTML content
-                await page.set_content(html_content, wait_until='networkidle')
-                
-                # Take screenshot
-                await page.screenshot(path=output_path, full_page=False)
-                
-                await browser.close()
-                return True
-        except Exception as e:
-            print(f"[IMAGE] ⚠️  Playwright failed: {e}")
-            # Fallback to Pillow
-            print(f"[IMAGE] 🔄 Trying Pillow fallback...")
-            return self.html_to_image_via_pillow(html_content, output_path)
+        max_retries = 3
+        base_wait = 1  # Start with 1 second
+        
+        for attempt in range(max_retries):
+            try:
+                return request_func(*args, **kwargs)
+            except tweepy.TweepyException as e:
+                # Check if it's a rate limit error (429)
+                if hasattr(e, 'response') and e.response.status_code == 429:
+                    if self._handle_rate_limit(e):
+                        # Retry after waiting
+                        continue
+                    else:
+                        # Couldn't extract reset time, use exponential backoff
+                        wait_time = base_wait * (2 ** attempt)
+                        print(f"⏸️  Rate limited. Exponential backoff: waiting {wait_time}s...")
+                        time.sleep(wait_time)
+                        continue
+                else:
+                    # Not a rate limit error, re-raise
+                    raise
+            except Exception as e:
+                print(f"❌ Unexpected error: {e}")
+                raise
+        
+        print("❌ Failed after all retries")
+        return None
     
-    def html_to_image(self, html_content: str, output_path: str) -> bool:
-        """
-        Sync wrapper for HTML to image conversion.
-        """
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(self.html_to_image_async(html_content, output_path))
-            loop.close()
-            return result
-        except Exception as e:
-            print(f"[IMAGE] ❌ Async error: {e}")
-            return False
-    
-    def post_signal_performance_with_image(
+    def format_signal_performance(
         self,
         symbol: str,
         entry_price: float,
@@ -101,96 +107,53 @@ class TwitterService:
         return_percent: float,
         profit_usd: float,
         result: str,
-        duration_minutes: int,
-        image_html: str
-    ) -> Optional[str]:
+        duration_minutes: int
+    ) -> str:
         """
-        Post signal performance to Twitter with a beautiful generated image.
-        
-        Args:
-            symbol: Trading pair (e.g., "BTC/USDT")
-            entry_price: Entry price
-            exit_price: Exit price
-            return_percent: Return percentage
-            profit_usd: Profit/loss in USD
-            result: "SUCCESS" or "FAILURE"
-            duration_minutes: How long the trade lasted
-            image_html: HTML content to render as image
-        
-        Returns:
-            Tweet ID if successful, None otherwise
+        Format a signal performance update with professional styling.
+        Similar to the email notification format.
         """
-        temp_image_path = None
-        try:
-            # Create temporary file for the image
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                temp_image_path = tmp.name
-            
-            print(f"[IMAGE] 🎨 Rendering HTML to image...")
-            
-            # Convert HTML to image
-            success = self.html_to_image(image_html, temp_image_path)
-            
-            if not success or not os.path.exists(temp_image_path):
-                print(f"[IMAGE] ❌ Failed to create image, posting text-only fallback...")
-                # Fall back to text-only post
-                return self.post_signal_performance(
-                    symbol=symbol,
-                    entry_price=entry_price,
-                    exit_price=exit_price,
-                    return_percent=return_percent,
-                    profit_usd=profit_usd,
-                    result=result,
-                    duration_minutes=duration_minutes
-                )
-            
-            print(f"[IMAGE] ✅ Image created: {temp_image_path}")
-            
-            # Build the tweet text (short caption)
-            is_win = result == "SUCCESS"
-            emoji = "📈" if is_win else "📉"
-            
-            tweet_text = f"{emoji} {symbol}\n"
-            tweet_text += f"Entry: ${entry_price:.4f} → Exit: ${exit_price:.4f}\n"
-            tweet_text += f"Return: {return_percent:+.2f}% | P&L: ${profit_usd:+.2f}"
-            
-            # Upload media using v1 API (for media_upload compatibility)
-            print(f"[TWITTER] 📤 Uploading image to Twitter...")
-            
-            # Create a v1.1 auth for media upload
-            auth = tweepy.OAuthHandler(self.api_key, self.api_secret)
-            auth.set_access_token(self.access_token, self.access_token_secret)
-            api_v1 = tweepy.API(auth)
-            
-            # Upload the image
-            media_response = api_v1.media_upload(filename=temp_image_path)
-            media_id = media_response.media_id
-            print(f"[TWITTER] ✅ Media uploaded: {media_id}")
-            
-            # Post tweet with media using v2 API
-            response = self.client.create_tweet(
-                text=tweet_text,
-                media_ids=[media_id]
-            )
-            
-            tweet_id = response.data['id']
-            print(f"[TWITTER] ✅ Tweet posted with image! ID: {tweet_id}")
-            
-            return tweet_id
-            
-        except Exception as e:
-            print(f"[TWITTER] ❌ Failed to post with image: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
-        finally:
-            # Clean up temp file
-            if temp_image_path and os.path.exists(temp_image_path):
-                try:
-                    os.unlink(temp_image_path)
-                    print(f"[IMAGE] 🧹 Cleaned up temp file")
-                except Exception as e:
-                    print(f"[IMAGE] ⚠️  Could not delete temp file: {e}")
+        # Color-coded result emoji
+        if result == "SUCCESS":
+            result_emoji = "✅"
+            result_text = "WINNER"
+            trend = "📈"
+        else:
+            result_emoji = "❌"
+            result_text = "LOSER"
+            trend = "📉"
+        
+        # Format values
+        entry_fmt = f"${entry_price:.4f}"
+        exit_fmt = f"${exit_price:.4f}"
+        return_fmt = f"{return_percent:+.2f}%"
+        profit_fmt = f"{profit_usd:+.2f}"
+        duration_fmt = f"{duration_minutes}m"
+        
+        # Determine risk level
+        if abs(return_percent) <= 1:
+            risk_level = "LOW"
+        elif abs(return_percent) <= 3:
+            risk_level = "MEDIUM"
+        else:
+            risk_level = "HIGH"
+        
+        # Professional format similar to email
+        tweet = f"""{result_emoji} {symbol}/USDT — {result_text}
+
+{trend} Performance Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Entry:     {entry_fmt}
+Exit:      {exit_fmt}
+Duration:  {duration_fmt}
+
+📊 Return: {return_fmt}
+💰 P&L:    ${profit_fmt} USD
+⚡ Risk:    {risk_level}
+
+#Crypto #Trading #DollaRaptor"""
+        
+        return tweet
     
     def post_signal_performance(
         self, 
@@ -203,7 +166,7 @@ class TwitterService:
         duration_minutes: int
     ) -> Optional[str]:
         """
-        Post a completed signal performance to Twitter (text only fallback).
+        Post a completed signal performance to Twitter.
         
         Args:
             symbol: Crypto symbol (e.g., 'BTC', 'ETH')
@@ -217,38 +180,70 @@ class TwitterService:
         Returns:
             Tweet ID if successful, None if failed
         """
-        try:
-            # Determine emoji and tone based on result
-            emoji = "✅" if result == "SUCCESS" else "❌"
-            result_text = "WINNER" if result == "SUCCESS" else "LOSER"
-            
-            # Format the tweet
-            tweet_text = f"""
-{emoji} SIGNAL PERFORMANCE UPDATE
-
-📊 {symbol} Trading Signal Completed
-Entry: ${entry_price:.4f}
-Exit: ${exit_price:.4f}
-
-📈 Return: {return_percent:.2f}%
-💰 P&L: {"+" if profit_usd > 0 else ""}{profit_usd:.2f} USD
-⏱️  Duration: {duration_minutes} mins
-
-Result: {result_text}
-
-#Crypto #Trading #Signals #DollaRaptor
-            """.strip()
-            
-            # Post to Twitter
-            response = self.client.create_tweet(text=tweet_text)
+        tweet_text = self.format_signal_performance(
+            symbol=symbol,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            return_percent=return_percent,
+            profit_usd=profit_usd,
+            result=result,
+            duration_minutes=duration_minutes
+        )
+        
+        # Post with rate limit handling
+        response = self._make_request_with_backoff(
+            self.client.create_tweet,
+            text=tweet_text
+        )
+        
+        if response:
             tweet_id = response.data['id']
-            
             print(f"✅ Tweet posted successfully! ID: {tweet_id}")
             return tweet_id
-            
-        except Exception as e:
-            print(f"❌ Error posting to Twitter: {e}")
+        else:
+            print(f"❌ Failed to post tweet after retries")
             return None
+    
+    def format_daily_performance_summary(
+        self,
+        total_signals: int,
+        wins: int,
+        losses: int,
+        win_rate: float,
+        total_profit: float,
+        avg_return: float
+    ) -> str:
+        """
+        Format a daily performance summary with professional styling.
+        """
+        # Performance indicator
+        if win_rate >= 70:
+            perf_emoji = "🔥"
+            perf_label = "EXCELLENT"
+        elif win_rate >= 50:
+            perf_emoji = "🚀"
+            perf_label = "SOLID"
+        else:
+            perf_emoji = "📊"
+            perf_label = "NEUTRAL"
+        
+        # Format values
+        win_rate_fmt = f"{win_rate:.1f}%"
+        profit_fmt = f"${total_profit:+.2f}"
+        avg_return_fmt = f"{avg_return:+.2f}%"
+        
+        tweet = f"""{perf_emoji} Daily Performance — {perf_label}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Signals: {total_signals} | ✅ {wins} | ❌ {losses}
+
+📈 Win Rate: {win_rate_fmt}
+💰 Net P&L: {profit_fmt}
+📊 Avg Return: {avg_return_fmt}
+
+Dollaraptor © 2025
+#TradingSignals #Crypto"""
+        
+        return tweet
     
     def post_daily_performance_summary(
         self, 
@@ -273,33 +268,68 @@ Result: {result_text}
         Returns:
             Tweet ID if successful, None if failed
         """
-        try:
-            emoji = "🚀" if win_rate > 60 else "📊"
-            
-            tweet_text = f"""
-{emoji} DAILY PERFORMANCE SNAPSHOT
-
-Signals Completed: {total_signals}
-✅ Winners: {wins} | ❌ Losers: {losses}
-
-📈 Win Rate: {win_rate:.1f}%
-💰 Total Profit: ${total_profit:.2f}
-📊 Avg Return: {avg_return:.2f}%
-
-Keep watching for next 5h+ delayed signals...
-
-#TradingSignals #Crypto #DollaRaptor
-            """.strip()
-            
-            response = self.client.create_tweet(text=tweet_text)
+        tweet_text = self.format_daily_performance_summary(
+            total_signals=total_signals,
+            wins=wins,
+            losses=losses,
+            win_rate=win_rate,
+            total_profit=total_profit,
+            avg_return=avg_return
+        )
+        
+        response = self._make_request_with_backoff(
+            self.client.create_tweet,
+            text=tweet_text
+        )
+        
+        if response:
             tweet_id = response.data['id']
-            
             print(f"✅ Daily summary posted! ID: {tweet_id}")
             return tweet_id
-            
-        except Exception as e:
-            print(f"❌ Error posting daily summary: {e}")
+        else:
+            print(f"❌ Failed to post daily summary after retries")
             return None
+    
+    def format_weekly_backtest_results(
+        self,
+        week: str,
+        total_trades: int,
+        win_rate: float,
+        total_pnl: float,
+        best_trade: float,
+        worst_trade: float
+    ) -> str:
+        """
+        Format weekly backtest results with professional styling.
+        """
+        # Performance indicator
+        if total_pnl >= 500:
+            perf_emoji = "🔥"
+        elif total_pnl >= 100:
+            perf_emoji = "🚀"
+        elif total_pnl >= 0:
+            perf_emoji = "📈"
+        else:
+            perf_emoji = "📉"
+        
+        # Format values
+        win_rate_fmt = f"{win_rate:.1f}%"
+        pnl_fmt = f"${total_pnl:+.2f}"
+        best_fmt = f"{best_trade:+.2f}%"
+        worst_fmt = f"{worst_trade:+.2f}%"
+        
+        tweet = f"""{perf_emoji} {week} — Backtest Results
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Trades: {total_trades} | Win Rate: {win_rate_fmt}
+
+💰 Net P&L: {pnl_fmt}
+🏆 Best Trade: {best_fmt}
+📉 Worst Trade: {worst_fmt}
+
+Dashboard: dollaraptor.com
+#BacktestResults #TradingAlgorithm"""
+        
+        return tweet
     
     def post_weekly_backtest_results(
         self, 
@@ -324,32 +354,26 @@ Keep watching for next 5h+ delayed signals...
         Returns:
             Tweet ID if successful, None if failed
         """
-        try:
-            performance_emoji = "🔥" if total_pnl > 500 else "📈" if total_pnl > 0 else "📉"
-            
-            tweet_text = f"""
-{performance_emoji} WEEKLY BACKTEST RESULTS - {week}
-
-📊 Total Trades: {total_trades}
-✅ Win Rate: {win_rate:.1f}%
-
-💰 Net P&L: ${total_pnl:.2f}
-🏆 Best Trade: +{best_trade:.2f}%
-📉 Worst Trade: {worst_trade:.2f}%
-
-Detailed analysis on dashboard 👉 dollaraptor.com
-
-#BacktestResults #TradingAlgorithm #DollaRaptor
-            """.strip()
-            
-            response = self.client.create_tweet(text=tweet_text)
+        tweet_text = self.format_weekly_backtest_results(
+            week=week,
+            total_trades=total_trades,
+            win_rate=win_rate,
+            total_pnl=total_pnl,
+            best_trade=best_trade,
+            worst_trade=worst_trade
+        )
+        
+        response = self._make_request_with_backoff(
+            self.client.create_tweet,
+            text=tweet_text
+        )
+        
+        if response:
             tweet_id = response.data['id']
-            
             print(f"✅ Weekly results posted! ID: {tweet_id}")
             return tweet_id
-            
-        except Exception as e:
-            print(f"❌ Error posting weekly results: {e}")
+        else:
+            print(f"❌ Failed to post weekly results after retries")
             return None
     
     def post_custom_message(self, message: str) -> Optional[str]:
@@ -362,19 +386,21 @@ Detailed analysis on dashboard 👉 dollaraptor.com
         Returns:
             Tweet ID if successful, None if failed
         """
-        try:
-            if len(message) > 280:
-                print(f"⚠️ Message is {len(message)} characters (max 280). Truncating...")
-                message = message[:277] + "..."
-            
-            response = self.client.create_tweet(text=message)
+        if len(message) > 280:
+            print(f"⚠️ Message is {len(message)} characters (max 280). Truncating...")
+            message = message[:277] + "..."
+        
+        response = self._make_request_with_backoff(
+            self.client.create_tweet,
+            text=message
+        )
+        
+        if response:
             tweet_id = response.data['id']
-            
             print(f"✅ Custom tweet posted! ID: {tweet_id}")
             return tweet_id
-            
-        except Exception as e:
-            print(f"❌ Error posting custom message: {e}")
+        else:
+            print(f"❌ Failed to post custom message after retries")
             return None
     
     def test_connection(self) -> bool:
@@ -393,6 +419,7 @@ Detailed analysis on dashboard 👉 dollaraptor.com
         except Exception as e:
             print(f"❌ Twitter API connection failed: {e}")
             return False
+
 
 # import tweepy
 # import os
