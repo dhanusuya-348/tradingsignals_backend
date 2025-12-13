@@ -53,8 +53,9 @@ def initialize_last_posted_id():
     """
     try:
         with open(STATE_FILE, "r") as f:
-            saved_id = int(f.read().strip())
-            if saved_id > 0:
+            content = f.read().strip()
+            if content:  # Changed from "if saved_id > 0"
+                saved_id = int(content)
                 print(f"[INIT] Using saved last_posted_id: {saved_id}")
                 return saved_id
     except:
