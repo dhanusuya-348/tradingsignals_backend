@@ -290,6 +290,179 @@ def format_signal_email(signal_data):
     """
     return body_html
 
+# Add this to your existing notifications.py file (after format_signal_email function)
+
+def format_performance_email(perf_data):
+    """
+    Create a nicely formatted HTML email for performance/backtest result notifications.
+    
+    perf_data comes from signal_performance table columns:
+    {
+        "symbol": "BNB",
+        "signal_id": 123,
+        "status": "COMPLETED",
+        "exit_price": "1215.45",
+        "pnl": "27.26",
+        "pnl_percent": "2.29",
+        "trade_duration": "30 minutes",
+        "final_result": "SUCCESS",  # or FAILURE
+        "exit_reason": "TP",  # TP = Take Profit, SL = Stop Loss, TIME = Timeout
+        "confidence": 62,
+        "sentiment": "bullish",
+        "analysis_notes": "...",
+    }
+    """
+    symbol = perf_data.get("symbol", "N/A")
+    signal_id = perf_data.get("signal_id", "N/A")
+    status = perf_data.get("status", "UNKNOWN")
+    exit_price = perf_data.get("exit_price", "N/A")
+    pnl = perf_data.get("pnl", 0)
+    pnl_percent = perf_data.get("pnl_percent", 0)
+    trade_duration = perf_data.get("trade_duration", "-")
+    final_result = perf_data.get("final_result", "UNKNOWN")
+    exit_reason = perf_data.get("exit_reason", "-")
+    confidence = perf_data.get("confidence", "N/A")
+    sentiment = perf_data.get("sentiment", "neutral")
+    analysis_notes = perf_data.get("analysis_notes", "No additional notes")
+
+    def safe_format(value):
+        """Format numeric values safely"""
+        if value == "N/A" or value == "-" or value is None:
+            return "N/A"
+        try:
+            return f"${float(value):,.2f}"
+        except (ValueError, TypeError):
+            return str(value)
+
+    def format_percent(value):
+        """Format percentage values"""
+        if value == "N/A" or value is None or value == "-":
+            return "N/A"
+        try:
+            val = float(value)
+            color = "#2ecc71" if val >= 0 else "#e74c3c"
+            sign = "+" if val >= 0 else ""
+            return f"<span style='color:{color};'>{sign}{val:.2f}%</span>"
+        except (ValueError, TypeError):
+            return str(value)
+
+    # Pick status color
+    status_color_map = {
+        "COMPLETED": "#2ecc71",
+        "FAILED": "#e74c3c",
+        "ERROR": "#c0392b",
+    }
+    status_color = status_color_map.get(status, "#3498db")
+
+    # Pick result color and emoji
+    if final_result == "SUCCESS":
+        result_color = "#2ecc71"
+        result_emoji = "🎉"
+        result_text = "WIN"
+    elif final_result == "FAILURE":
+        result_color = "#e74c3c"
+        result_emoji = "📉"
+        result_text = "LOSS"
+    else:
+        result_color = "#95a5a6"
+        result_emoji = "❓"
+        result_text = final_result
+
+    # Map exit reason
+    exit_reason_map = {
+        "TP": "Take Profit ✅",
+        "SL": "Stop Loss ⛔",
+        "TIME": "Time Expired ⏱️",
+    }
+    exit_reason_text = exit_reason_map.get(exit_reason, exit_reason)
+
+    body_html = f"""
+    <html>
+    <body style="font-family: 'Segoe UI', Arial, sans-serif; background-color: #f4f4f4; padding: 20px;">
+
+      <div style="max-width: 700px; margin:auto; background:white; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.1); padding:25px;">
+        
+        <h2 style="color:#333;">📊 {symbol}/USDT — Performance Report</h2>
+        <p style="font-size:14px; color:#777;">Signal ID: #{signal_id}</p>
+        
+        <div style="background:{status_color}; color:white; padding:12px; border-radius:6px; text-align:center; margin:15px 0; font-weight:bold; font-size:16px;">
+          Status: {status}
+        </div>
+
+        <hr style="border:none; border-top:1px solid #eee; margin:20px 0;"/>
+
+        <h3 style="color:#444;">🎯 Trade Result</h3>
+        <div style="background:#f9f9f9; padding:15px; border-radius:6px; border-left:4px solid {result_color};">
+          <p style="font-size:20px; font-weight:bold; color:{result_color}; margin:5px 0;">
+            {result_emoji} {result_text}
+          </p>
+          <p style="color:#555; margin:10px 0; font-size:15px;">
+            <b>P&L:</b> {safe_format(pnl)} ({format_percent(pnl_percent)})
+          </p>
+        </div>
+
+        <h3 style="color:#444; margin-top:20px;">💼 Trade Details</h3>
+        <table style="width:100%; border-collapse:collapse; font-size:14px;">
+          <tr style="background:#f5f5f5;">
+            <td style="padding:10px; font-weight:bold;">Exit Price</td>
+            <td style="padding:10px;">{safe_format(exit_price)}</td>
+          </tr>
+          <tr>
+            <td style="padding:10px; font-weight:bold;">Exit Reason</td>
+            <td style="padding:10px;">{exit_reason_text}</td>
+          </tr>
+          <tr style="background:#f5f5f5;">
+            <td style="padding:10px; font-weight:bold;">Trade Duration</td>
+            <td style="padding:10px;">{trade_duration}</td>
+          </tr>
+        </table>
+
+        <h3 style="color:#444; margin-top:20px;">🔍 Signal Metrics</h3>
+        <ul style="line-height:1.8; color:#555;">
+          <li><b>Confidence:</b> {confidence}%</li>
+          <li><b>Sentiment:</b> {sentiment.capitalize()}</li>
+        </ul>
+
+        <h3 style="color:#444; margin-top:20px;">📝 Analysis Notes</h3>
+        <div style="background:#fffbea; padding:12px; border-radius:6px; border-left:4px solid #f39c12;">
+          <p style="color:#555; font-size:14px; margin:0;">{analysis_notes}</p>
+        </div>
+
+        <hr style="border:none; border-top:1px solid #eee; margin:20px 0;"/>
+        
+        <div style="background:#e8f5e9; border-left:4px solid #4caf50; padding:12px; margin:15px 0; border-radius:4px;">
+          <p style="color:#2e7d32; font-size:14px; margin:0;"><b>✅ Keep Learning:</b> Review this trade to improve your trading strategy!</p>
+        </div>
+
+        <p style="font-size:12px; color:#aaa; text-align:center; margin-bottom:10px;">Dollaraptor © 2025 | AI-Powered Crypto Insights</p>
+        <p style="font-size:11px; color:#999; text-align:center; background:#f9f9f9; padding:10px; border-radius:4px; border:1px solid #eee;"><b>📌 Disclaimer:</b> This is a performance report based on backtesting/simulation. Past performance does not guarantee future results. Always trade responsibly.</p>
+      </div>
+    </body>
+    </html>
+    """
+    return body_html
+
+
+def send_performance_email(to_email, perf_data):
+    """
+    Send performance report email via AWS SES
+    
+    Args:
+        to_email: recipient email address
+        perf_data: performance data dictionary
+    """
+    symbol = perf_data.get("symbol", "UNKNOWN")
+    final_result = perf_data.get("final_result", "UNKNOWN")
+    
+    # Create subject with emoji based on result
+    emoji_map = {"SUCCESS": "🎉", "FAILURE": "📉", "ERROR": "⚠️"}
+    emoji = emoji_map.get(final_result, "📊")
+    
+    subject = f"{emoji} {symbol} Performance Report - {final_result}"
+    
+    body_html = format_performance_email(perf_data)
+    
+    return send_email(to_email, subject, body_html=body_html)
 
 def send_email(to_email, subject, body_text=None, body_html=None):
     """
