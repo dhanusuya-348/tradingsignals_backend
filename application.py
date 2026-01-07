@@ -254,9 +254,11 @@ def submit_review():
             if not user:
                 return jsonify({"error": "User not found. Please sign up first."}), 404
             
-            # Check subscription status (optional - only allow subscribers to review)
-            if user.subscription_status not in ['active', 'pro', 'max']:
-                return jsonify({"error": "Only subscribers can post reviews"}), 403
+            # ✅ FIXED: Check subscription_plan instead of subscription_status
+            if user.subscription_plan not in ['pro', 'max']:
+                return jsonify({
+                    "error": f"Only Pro and Max subscribers can post reviews. Your current plan: {user.subscription_plan}"
+                }), 403
             
             # Create new review
             review = Review(
@@ -588,6 +590,8 @@ def get_profile(user_sub):
                 "name": user.name,
                 "phone": user.phone,
                 "subscription_status": user.subscription_status,
+                "subscription_plan": user.subscription_plan,
+                "subscription_date": user.subscription_date.isoformat() if user.subscription_date else None,  # ✅ THIS LINE
                 "created_at": user.created_at.isoformat() if user.created_at else None,
                 "updated_at": user.updated_at.isoformat() if user.updated_at else None
             })
@@ -609,6 +613,47 @@ def update_subscription(user_sub):
             user.updated_at = datetime.utcnow()
             return jsonify({"ok": True, "subscription_status": subscription_status})
     except Exception as e:
+        return {"error": str(e)}, 500
+
+@application.route("/api/users/<user_sub>", methods=["PUT"])
+def update_user_profile(user_sub):
+    """Update user name and/or phone"""
+    data = request.json or {}
+    name = data.get("name")
+    phone = data.get("phone")
+    
+    if not name and not phone:
+        return {"error": "At least one field (name or phone) is required"}, 400
+    
+    try:
+        with get_session_context() as session:
+            user = session.query(User).filter_by(user_sub=user_sub).first()
+            if not user:
+                return {"error": "User not found"}, 404
+            
+            # Update fields if provided
+            if name:
+                user.name = name.strip()
+            if phone:
+                user.phone = phone.strip()
+            
+            user.updated_at = datetime.utcnow()
+            session.commit()
+            
+            return jsonify({
+                "ok": True,
+                "message": "Profile updated successfully",
+                "user": {
+                    "user_sub": user.user_sub,
+                    "name": user.name,
+                    "phone": user.phone,
+                    "email": user.email
+                }
+            }), 200
+            
+    except Exception as e:
+        print(f"Error updating user profile: {e}")
+        traceback.print_exc()
         return {"error": str(e)}, 500
 
 # ======================
