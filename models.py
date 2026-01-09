@@ -146,6 +146,9 @@ class User(Base):
     name = Column(String, nullable=True)                                            # Display name
     phone = Column(String, nullable=True)                                           # Phone number for SMS
     
+    # Email notification preference - NEW FIELD
+    email_notifications = Column(Boolean, default=True, nullable=False)             # Email notifications ON/OFF
+    
     # Subscription fields
     subscription_status = Column(String, default="free", nullable=False)            # free/active/cancelled
     subscription_plan = Column(String, default="free", nullable=False)              # free/pro/max
@@ -159,7 +162,8 @@ class User(Base):
 
     def __repr__(self):
         return (f"<User(user_sub={self.user_sub}, email={self.email}, "
-                f"plan={self.subscription_plan}, status={self.subscription_status})>")
+                f"plan={self.subscription_plan}, status={self.subscription_status}, "
+                f"email_notifications={self.email_notifications})>")
 
 # ==========================
 # DATABASE ENGINE & SESSIONS

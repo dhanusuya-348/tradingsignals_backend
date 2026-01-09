@@ -443,13 +443,14 @@ def format_performance_email(perf_data):
     return body_html
 
 
-def send_performance_email(to_email, perf_data):
+def send_performance_email(to_email, perf_data, user_sub=None):
     """
     Send performance report email via AWS SES
     
     Args:
         to_email: recipient email address
         perf_data: performance data dictionary
+        user_sub: user ID to check email preferences (optional)
     """
     symbol = perf_data.get("symbol", "UNKNOWN")
     final_result = perf_data.get("final_result", "UNKNOWN")
@@ -462,17 +463,34 @@ def send_performance_email(to_email, perf_data):
     
     body_html = format_performance_email(perf_data)
     
-    return send_email(to_email, subject, body_html=body_html)
+    return send_email(to_email, subject, body_html=body_html, user_sub=user_sub)
 
-def send_email(to_email, subject, body_text=None, body_html=None):
+def send_email(to_email, subject, body_text=None, body_html=None, user_sub=None):
     """
     Send email via AWS SES with error handling
+    
+    NEW: Checks user's email_notifications preference before sending
+    If user_sub is provided, checks if user has email notifications enabled
+    If disabled, skips sending silently (no error)
     """
     if body_html is None and body_text is None:
         raise ValueError("Either body_text or body_html must be provided")
 
     if body_html is None:
         body_html = f"<html><body>{body_text}</body></html>"
+
+    # NEW: Check email notifications preference if user_sub is provided
+    if user_sub:
+        try:
+            from models import get_session_context, User
+            with get_session_context() as session:
+                user = session.query(User).filter_by(user_sub=user_sub).first()
+                if user and not user.email_notifications:
+                    print(f"📧 [SES] Email notifications disabled for user {user_sub}, skipping email to {to_email}")
+                    return True  # Return success to avoid breaking existing flows
+        except Exception as e:
+            print(f"⚠️ [SES] Could not check email preference for {user_sub}: {e}")
+            # Continue with sending email if we can't check preference
 
     try:
         response = ses_client.send_email(

@@ -591,7 +591,8 @@ def get_profile(user_sub):
                 "phone": user.phone,
                 "subscription_status": user.subscription_status,
                 "subscription_plan": user.subscription_plan,
-                "subscription_date": user.subscription_date.isoformat() if user.subscription_date else None,  # ✅ THIS LINE
+                "subscription_date": user.subscription_date.isoformat() if user.subscription_date else None,
+                "email_notifications": user.email_notifications,  # NEW: Include email notifications preference
                 "created_at": user.created_at.isoformat() if user.created_at else None,
                 "updated_at": user.updated_at.isoformat() if user.updated_at else None
             })
@@ -614,6 +615,50 @@ def update_subscription(user_sub):
             return jsonify({"ok": True, "subscription_status": subscription_status})
     except Exception as e:
         return {"error": str(e)}, 500
+
+@application.route("/api/users/<user_sub>/email-notifications", methods=["PUT"])
+def toggle_email_notifications(user_sub):
+    """
+    Toggle email notifications ON/OFF for a user
+    
+    Request body: {"email_notifications": true/false}
+    """
+    try:
+        data = request.json or {}
+        email_notifications = data.get("email_notifications")
+        
+        # Validate input
+        if email_notifications is None:
+            return jsonify({"error": "email_notifications field is required"}), 400
+        
+        if not isinstance(email_notifications, bool):
+            return jsonify({"error": "email_notifications must be true or false"}), 400
+        
+        with get_session_context() as session:
+            user = session.query(User).filter_by(user_sub=user_sub).first()
+            if not user:
+                return jsonify({"error": "User not found"}), 404
+            
+            # Update email notifications preference
+            old_value = user.email_notifications
+            user.email_notifications = email_notifications
+            user.updated_at = datetime.utcnow()
+            
+            # Log the change
+            status = "enabled" if email_notifications else "disabled"
+            print(f"📧 Email notifications {status} for user {user_sub} (was: {old_value})")
+            
+            return jsonify({
+                "ok": True,
+                "message": f"Email notifications {status} successfully",
+                "email_notifications": email_notifications,
+                "previous_value": old_value
+            }), 200
+            
+    except Exception as e:
+        print(f"Error toggling email notifications: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 @application.route("/api/users/<user_sub>", methods=["PUT"])
 def update_user_profile(user_sub):
