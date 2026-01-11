@@ -173,7 +173,9 @@ def get_signal_with_performance(session, perf):
             'result': perf.result,  # SUCCESS or FAILURE
             'duration_minutes': perf.duration_minutes or 0,
             'created_at': signal.created_at,
-            'completed_at': perf.tracked_at
+            'completed_at': perf.tracked_at,
+            'entry_time': signal.created_at,  # Signal creation time as entry
+            'exit_time': perf.tracked_at      # Performance tracking time as exit
         }
     except Exception as e:
         print(f"[ERROR] Failed to extract signal data: {e}")
@@ -200,7 +202,9 @@ def post_to_twitter(signal_data):
             return_percent=signal_data['return_percent'],
             profit_usd=signal_data['profit_usd'],
             result=signal_data['result'],
-            duration_minutes=signal_data['duration_minutes']
+            duration_minutes=signal_data['duration_minutes'],
+            entry_time=signal_data['entry_time'],
+            exit_time=signal_data['exit_time']
         )
         
         if tweet_id:

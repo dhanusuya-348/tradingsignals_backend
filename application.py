@@ -1,6 +1,7 @@
 # application.py
 from flask import Flask, request, jsonify, send_file
 from models import Base, get_engine_from_env, get_session_context, Watchlist, Signal, UserSignal, User, SignalPerformance, Review
+from subscription_utils import require_active_subscription, cleanup_expired_subscriptions
 from datetime import datetime
 from flask_cors import CORS
 from sqlalchemy import desc
@@ -9,6 +10,7 @@ import os
 import threading
 from algo.runner import generate_pdf_report_full
 from subscription_routes import register_subscription_routes
+from subscription_scheduler import start_subscription_scheduler
 import boto3
 from botocore.exceptions import ClientError
 from twitter_service import TwitterService
@@ -726,28 +728,22 @@ def update_user_profile(user_sub):
             print(f"❌ [PROFILE_UPDATE] Error: No fields provided")
             return {"error": "At least one field (name or phone) is required"}, 400
         
-        # ✅ FIX: Use manual session management instead of context manager
-        session = get_session_context().__enter__()
-        
-        try:
-            print(f"🔧 [PROFILE_UPDATE] Database session acquired")
-            
+        with get_session_context() as session:
             user = session.query(User).filter_by(user_sub=user_sub).first()
             if not user:
-                print(f"❌ [PROFILE_UPDATE] Error: User {user_sub} not found")
-                session.rollback()
+                print(f"❌ [PROFILE_UPDATE] User {user_sub} not found")
                 return {"error": "User not found"}, 404
             
             print(f"🔧 [PROFILE_UPDATE] User found: {user.email}")
             print(f"🔧 [PROFILE_UPDATE] Current values: name='{user.name}', phone='{user.phone}'")
             
             # Update fields if provided
-            if name:
+            if name and name.strip():
                 old_name = user.name
                 user.name = name.strip()
                 print(f"🔧 [PROFILE_UPDATE] Name updated: '{old_name}' → '{user.name}'")
             
-            if phone:
+            if phone and phone.strip():
                 old_phone = user.phone
                 user.phone = phone.strip()
                 print(f"🔧 [PROFILE_UPDATE] Phone updated: '{old_phone}' → '{user.phone}'")
@@ -755,7 +751,10 @@ def update_user_profile(user_sub):
             user.updated_at = datetime.utcnow()
             print(f"🔧 [PROFILE_UPDATE] Updated timestamp set: {user.updated_at}")
             
-            # ✅ Create response dict BEFORE committing
+            session.flush()
+            # ✅ The context manager handles commit automatically
+            
+            # ✅ Create response dict INSIDE session
             user_dict = {
                 "user_sub": user.user_sub,
                 "name": user.name,
@@ -763,25 +762,12 @@ def update_user_profile(user_sub):
                 "email": user.email
             }
             
-            # ✅ NOW commit the transaction
-            session.commit()
-            print(f"✅ [PROFILE_UPDATE] Session committed successfully")
-            
-            return jsonify({
-                "ok": True,
-                "message": "Profile updated successfully",
-                "user": user_dict
-            }), 200
-            
-        except Exception as e:
-            session.rollback()
-            print(f"❌ [PROFILE_UPDATE] Error, rolling back: {e}")
-            traceback.print_exc()
-            raise
-            
-        finally:
-            session.close()
-            print(f"🔧 [PROFILE_UPDATE] Session closed")
+        # Session closed, safe to return
+        return jsonify({
+            "ok": True,
+            "message": "Profile updated successfully",
+            "user": user_dict
+        }), 200
         
     except Exception as e:
         print(f"❌ [PROFILE_UPDATE] Error updating user profile for {user_sub}: {e}")
@@ -790,8 +776,10 @@ def update_user_profile(user_sub):
 
 # ======================
 # WATCHLIST ROUTES
+
 # ======================
 @application.route("/watchlist", methods=["POST"])
+@require_active_subscription
 def add_watchlist():
     data = request.json or {}
     user_sub = data.get("user_sub")
@@ -817,6 +805,7 @@ def add_watchlist():
         return {"error": str(e)}, 500
 
 @application.route("/watchlist/<user_sub>", methods=["GET"])
+@require_active_subscription
 def get_watchlist(user_sub):
     try:
         with get_session_context() as session:
@@ -832,6 +821,7 @@ def get_watchlist(user_sub):
         return {"error": str(e)}, 500
 
 @application.route("/watchlist/<user_sub>/<symbol>", methods=["DELETE"])
+@require_active_subscription
 def remove_from_watchlist(user_sub, symbol):
     try:
         with get_session_context() as session:
@@ -849,6 +839,7 @@ def remove_from_watchlist(user_sub, symbol):
 # DASHBOARD/SIGNALS ROUTES
 # ======================
 @application.route("/api/user-signals/<user_sub>", methods=["GET"])
+@require_active_subscription
 def get_user_signals_dashboard(user_sub):
     """Fetch all signals for coins in the user's watchlist with PDF status."""
     try:
@@ -1281,6 +1272,7 @@ def get_all_signal_performance():
 # Add these UPDATED routes to your application.py file (replace the existing ones)
 
 @application.route("/api/signals/performance/user/<user_sub>", methods=["GET"])
+@require_active_subscription
 def get_user_signal_performance_direct(user_sub):
     """
     Fetch performance data for a specific user's signals.
@@ -1373,6 +1365,7 @@ def get_user_signal_performance_direct(user_sub):
         return jsonify({"error": str(e)}), 500
 
 @application.route("/api/signals/performance/stats/<user_sub>", methods=["GET"])
+@require_active_subscription
 def get_user_performance_stats(user_sub):
     """
     Get aggregated performance statistics for a user.
@@ -2022,10 +2015,10 @@ def post_custom_twitter():
 @application.route("/subscription/plans", methods=["GET"])
 def get_subscription_plans():
     plans = [
-        {"id": "basic", "name": "Basic Plan", "price": 29.99, "currency": "USD", "interval": "month",
-         "features": ["Real-time trading signals", "Email notifications", "Up to 5 coins in watchlist", "Basic analytics"]},
-        {"id": "pro", "name": "Pro Plan", "price": 79.99, "currency": "USD", "interval": "month",
-         "features": ["Everything in Basic", "SMS notifications", "Unlimited watchlist", "Advanced analytics", "PDF reports", "Priority support"]}
+        {"id": "pro", "name": "CryptoPro", "price": 49, "currency": "USD", "interval": "month",
+         "features": ["Real-time trading signals", "Email notifications", "Up to 25 coins in watchlist", "PDF reports"]},
+        {"id": "max", "name": "CryptoMax", "price": 149, "currency": "USD", "interval": "month",
+         "features": ["Everything in Pro", "Unlimited watchlist", "Advanced analytics", "Priority support", "VIP access"]}
     ]
     return jsonify(plans)
 
@@ -2058,6 +2051,9 @@ def cancel_subscription():
     
 # After this line:
 register_subscription_routes(application)
+
+# Start subscription cleanup scheduler
+start_subscription_scheduler()
 
 # Add this debug code:
 print("\n=== REGISTERED ROUTES ===")

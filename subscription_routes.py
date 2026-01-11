@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 from flask import request, jsonify
 from models import get_session_context, User
+from subscription_utils import calculate_expiry_date
 import traceback
 
 # =====================
@@ -198,6 +199,7 @@ def handle_stripe_webhook():
                         user.stripe_customer_id = full_session.customer
                         user.stripe_subscription_id = full_session.subscription
                         user.subscription_date = datetime.utcnow()
+                        user.expiry_date = calculate_expiry_date(datetime.utcnow())  # Add 30 days
                         user.updated_at = datetime.utcnow()
                         
                         print(f"[WEBHOOK] ✅ User {user_sub} upgraded to plan: {plan}")
@@ -235,10 +237,11 @@ def handle_stripe_webhook():
                     stripe_customer_id=customer_id
                 ).first()
                 if user:
+                    # Don't immediately revoke access - let it expire naturally
                     user.subscription_status = "cancelled"
-                    user.subscription_plan = "free"
+                    # Keep subscription_plan and expiry_date unchanged for continued access
                     user.updated_at = datetime.utcnow()
-                    print(f"[WEBHOOK] ✅ User {user.user_sub} subscription cancelled")
+                    print(f"[WEBHOOK] ✅ User {user.user_sub} subscription cancelled (access continues until expiry)")
         
         return jsonify({"ok": True}), 200
         
@@ -267,6 +270,8 @@ def get_user_subscription():
                 "subscription_status": user.subscription_status,
                 "subscription_plan": getattr(user, "subscription_plan", "free"),
                 "subscription_date": user.subscription_date.isoformat() if hasattr(user, "subscription_date") and user.subscription_date else None,
+                "expiry_date": user.expiry_date.isoformat() if hasattr(user, "expiry_date") and user.expiry_date else None,
+                "is_active": user.has_active_subscription(),
                 "stripe_customer_id": getattr(user, "stripe_customer_id", None)
             }), 200
     except Exception as e:
