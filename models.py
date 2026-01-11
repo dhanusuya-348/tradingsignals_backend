@@ -194,12 +194,17 @@ def get_session_context():
     session = SessionLocal()
     try:
         yield session
+        # Explicitly flush before commit to ensure all changes are written
+        session.flush()
         session.commit()
-    except:
+        print(f"✅ [SESSION] Transaction committed successfully")
+    except Exception as e:
+        print(f"❌ [SESSION] Error occurred, rolling back: {e}")
         session.rollback()
         raise
     finally:
         session.close()
+        print(f"🔧 [SESSION] Session closed")
 
 def get_session():
     """Return a normal session (without context manager)."""

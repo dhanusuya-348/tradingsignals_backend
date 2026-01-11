@@ -686,41 +686,66 @@ def toggle_email_notifications(user_sub):
 @application.route("/api/users/<user_sub>", methods=["PUT"])
 def update_user_profile(user_sub):
     """Update user name and/or phone"""
-    data = request.json or {}
-    name = data.get("name")
-    phone = data.get("phone")
-    
-    if not name and not phone:
-        return {"error": "At least one field (name or phone) is required"}, 400
-    
     try:
+        print(f"🔧 [PROFILE_UPDATE] Request received for user {user_sub}")
+        
+        data = request.json or {}
+        name = data.get("name")
+        phone = data.get("phone")
+        
+        print(f"🔧 [PROFILE_UPDATE] Data received: name='{name}', phone='{phone}'")
+        
+        if not name and not phone:
+            print(f"❌ [PROFILE_UPDATE] Error: No fields provided")
+            return {"error": "At least one field (name or phone) is required"}, 400
+        
         with get_session_context() as session:
+            print(f"🔧 [PROFILE_UPDATE] Database session acquired")
+            
             user = session.query(User).filter_by(user_sub=user_sub).first()
             if not user:
+                print(f"❌ [PROFILE_UPDATE] Error: User {user_sub} not found")
                 return {"error": "User not found"}, 404
+            
+            print(f"🔧 [PROFILE_UPDATE] User found: {user.email}")
+            print(f"🔧 [PROFILE_UPDATE] Current values: name='{user.name}', phone='{user.phone}'")
             
             # Update fields if provided
             if name:
+                old_name = user.name
                 user.name = name.strip()
+                print(f"🔧 [PROFILE_UPDATE] Name updated: '{old_name}' → '{user.name}'")
+            
             if phone:
+                old_phone = user.phone
                 user.phone = phone.strip()
+                print(f"🔧 [PROFILE_UPDATE] Phone updated: '{old_phone}' → '{user.phone}'")
             
             user.updated_at = datetime.utcnow()
-            session.commit()
+            print(f"🔧 [PROFILE_UPDATE] Updated timestamp set: {user.updated_at}")
             
-            return jsonify({
-                "ok": True,
-                "message": "Profile updated successfully",
-                "user": {
-                    "user_sub": user.user_sub,
-                    "name": user.name,
-                    "phone": user.phone,
-                    "email": user.email
-                }
-            }), 200
+            # Explicitly flush to ensure changes are written to database
+            session.flush()
+            print(f"🔧 [PROFILE_UPDATE] Session flushed")
             
+            # The context manager will automatically commit
+            print(f"🔧 [PROFILE_UPDATE] About to commit changes")
+            
+        print(f"✅ [PROFILE_UPDATE] Profile updated successfully for user {user_sub}")
+        
+        return jsonify({
+            "ok": True,
+            "message": "Profile updated successfully",
+            "user": {
+                "user_sub": user.user_sub,
+                "name": user.name,
+                "phone": user.phone,
+                "email": user.email
+            }
+        }), 200
+        
     except Exception as e:
-        print(f"Error updating user profile: {e}")
+        print(f"❌ [PROFILE_UPDATE] Error updating user profile for {user_sub}: {e}")
         traceback.print_exc()
         return {"error": str(e)}, 500
 
