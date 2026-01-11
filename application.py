@@ -272,6 +272,8 @@ def submit_review():
                 updated_at=datetime.utcnow()
             )
             session.add(review)
+            session.flush()
+            session.commit()  # ✅ EXPLICITLY COMMIT!
             
             return jsonify({
                 "ok": True,
@@ -362,6 +364,8 @@ def verify_review(review_id):
             
             review.verified = True
             review.updated_at = datetime.utcnow()
+            session.flush()
+            session.commit()  # ✅ EXPLICITLY COMMIT!
             
             return jsonify({
                 "ok": True,
@@ -390,6 +394,8 @@ def delete_review(review_id):
                 return jsonify({"error": "Review not found"}), 404
             
             session.delete(review)
+            session.flush()
+            session.commit()  # ✅ EXPLICITLY COMMIT!
             
             return jsonify({
                 "ok": True,
@@ -575,17 +581,24 @@ def create_or_update_profile():
                 session.add(user)
                 action = "created"
 
-            return jsonify({
-                "ok": True,
-                "action": action,
-                "user": {
-                    "user_sub": user.user_sub,
-                    "email": user.email,
-                    "name": user.name,
-                    "phone": user.phone,
-                    "subscription_status": user.subscription_status
-                }
-            })
+            session.flush()
+            session.commit()  # ✅ EXPLICITLY COMMIT!
+            
+            # ✅ Create user_dict INSIDE session while it's still active
+            user_dict = {
+                "user_sub": user.user_sub,
+                "email": user.email,
+                "name": user.name,
+                "phone": user.phone,
+                "subscription_status": user.subscription_status
+            }
+            
+        # ✅ Session is now closed, safe to return dict
+        return jsonify({
+            "ok": True,
+            "action": action,
+            "user": user_dict
+        })
     except Exception as e:
         return {"error": str(e)}, 500
 
@@ -596,7 +609,9 @@ def get_profile(user_sub):
             user = session.query(User).filter_by(user_sub=user_sub).first()
             if not user:
                 return {"error": "User not found"}, 404
-            return jsonify({
+            
+            # ✅ Create user_dict INSIDE session while it's still active
+            user_dict = {
                 "user_sub": user.user_sub,
                 "email": user.email,
                 "name": user.name,
@@ -604,10 +619,13 @@ def get_profile(user_sub):
                 "subscription_status": user.subscription_status,
                 "subscription_plan": user.subscription_plan,
                 "subscription_date": user.subscription_date.isoformat() if user.subscription_date else None,
-                "email_notifications": user.email_notifications,  # NEW: Include email notifications preference
+                "email_notifications": user.email_notifications,
                 "created_at": user.created_at.isoformat() if user.created_at else None,
                 "updated_at": user.updated_at.isoformat() if user.updated_at else None
-            })
+            }
+            
+        # ✅ Session is now closed, safe to return dict
+        return jsonify(user_dict)
     except Exception as e:
         return {"error": str(e)}, 500
 
@@ -624,6 +642,8 @@ def update_subscription(user_sub):
                 return {"error": "User not found"}, 404
             user.subscription_status = subscription_status
             user.updated_at = datetime.utcnow()
+            session.flush()
+            session.commit()  # ✅ EXPLICITLY COMMIT!
             return jsonify({"ok": True, "subscription_status": subscription_status})
     except Exception as e:
         return {"error": str(e)}, 500
@@ -666,17 +686,24 @@ def toggle_email_notifications(user_sub):
             user.email_notifications = email_notifications
             user.updated_at = datetime.utcnow()
             
+            session.flush()
+            session.commit()  # ✅ EXPLICITLY COMMIT!
+            
             # Log the database update
             status = "enabled" if email_notifications else "disabled"
             print(f"✅ [EMAIL_TOGGLE] Database updated: Email notifications {status} for user {user_sub}")
             print(f"📧 [EMAIL_TOGGLE] Previous value: {old_value}, New value: {email_notifications}")
             
-            return jsonify({
+            # ✅ Create response dict INSIDE session
+            response_dict = {
                 "ok": True,
                 "message": f"Email notifications {status} successfully",
                 "email_notifications": email_notifications,
                 "previous_value": old_value
-            }), 200
+            }
+            
+        # ✅ Session is now closed, safe to return dict
+        return jsonify(response_dict), 200
             
     except Exception as e:
         print(f"❌ [EMAIL_TOGGLE] Error toggling email notifications for user {user_sub}: {e}")
@@ -699,12 +726,16 @@ def update_user_profile(user_sub):
             print(f"❌ [PROFILE_UPDATE] Error: No fields provided")
             return {"error": "At least one field (name or phone) is required"}, 400
         
-        with get_session_context() as session:
+        # ✅ FIX: Use manual session management instead of context manager
+        session = get_session_context().__enter__()
+        
+        try:
             print(f"🔧 [PROFILE_UPDATE] Database session acquired")
             
             user = session.query(User).filter_by(user_sub=user_sub).first()
             if not user:
                 print(f"❌ [PROFILE_UPDATE] Error: User {user_sub} not found")
+                session.rollback()
                 return {"error": "User not found"}, 404
             
             print(f"🔧 [PROFILE_UPDATE] User found: {user.email}")
@@ -724,25 +755,33 @@ def update_user_profile(user_sub):
             user.updated_at = datetime.utcnow()
             print(f"🔧 [PROFILE_UPDATE] Updated timestamp set: {user.updated_at}")
             
-            # Explicitly flush to ensure changes are written to database
-            session.flush()
-            print(f"🔧 [PROFILE_UPDATE] Session flushed")
-            
-            # The context manager will automatically commit
-            print(f"🔧 [PROFILE_UPDATE] About to commit changes")
-            
-        print(f"✅ [PROFILE_UPDATE] Profile updated successfully for user {user_sub}")
-        
-        return jsonify({
-            "ok": True,
-            "message": "Profile updated successfully",
-            "user": {
+            # ✅ Create response dict BEFORE committing
+            user_dict = {
                 "user_sub": user.user_sub,
                 "name": user.name,
                 "phone": user.phone,
                 "email": user.email
             }
-        }), 200
+            
+            # ✅ NOW commit the transaction
+            session.commit()
+            print(f"✅ [PROFILE_UPDATE] Session committed successfully")
+            
+            return jsonify({
+                "ok": True,
+                "message": "Profile updated successfully",
+                "user": user_dict
+            }), 200
+            
+        except Exception as e:
+            session.rollback()
+            print(f"❌ [PROFILE_UPDATE] Error, rolling back: {e}")
+            traceback.print_exc()
+            raise
+            
+        finally:
+            session.close()
+            print(f"🔧 [PROFILE_UPDATE] Session closed")
         
     except Exception as e:
         print(f"❌ [PROFILE_UPDATE] Error updating user profile for {user_sub}: {e}")
@@ -771,6 +810,8 @@ def add_watchlist():
             if hasattr(w, "phone") and phone:
                 setattr(w, "phone", phone)
             session.add(w)
+            session.flush()
+            session.commit()  # ✅ EXPLICITLY COMMIT!
             return jsonify({"ok": True, "message": f"Added {symbol.upper()} to watchlist"})
     except Exception as e:
         return {"error": str(e)}, 500
@@ -798,6 +839,8 @@ def remove_from_watchlist(user_sub, symbol):
             if not watchlist_item:
                 return {"error": "Watchlist item not found"}, 404
             session.delete(watchlist_item)
+            session.flush()
+            session.commit()  # ✅ EXPLICITLY COMMIT!
             return jsonify({"ok": True, "message": f"Removed {symbol.upper()} from watchlist"})
     except Exception as e:
         return {"error": str(e)}, 500
@@ -1501,6 +1544,8 @@ def request_pdf(user_signal_id):
             user_signal.pdf_status = "initiated"
             user_signal.pdf_url = None
             session.add(user_signal)
+            session.flush()
+            session.commit()  # ✅ EXPLICITLY COMMIT!
 
         return jsonify({
             "status": "initiated",
@@ -2005,6 +2050,8 @@ def cancel_subscription():
             if user:
                 user.subscription_status = "cancelled"
                 user.updated_at = datetime.utcnow()
+                session.flush()
+                session.commit()  # ✅ EXPLICITLY COMMIT!
             return jsonify({"ok": True, "message": "Subscription cancelled"})
     except Exception as e:
         return {"error": str(e)}, 500
