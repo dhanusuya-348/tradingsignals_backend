@@ -84,8 +84,8 @@ def process_signal_thread(signal_id, perf_id):
                                 "analysis_notes": f"Exit Reason: {perf_obj.exit_reason}. Check dashboard for full analysis.",
                             }
                             
-                            # Send email
-                            success = send_performance_email(us.email, perf_data)
+                            # Send email with user_sub for preference checking
+                            success = send_performance_email(us.email, perf_data, us.user_sub)
                             
                             if success:
                                 print(f"   ✅ Email sent to {us.email}")
@@ -115,7 +115,7 @@ def process_signal_thread(signal_id, perf_id):
                             "analysis_notes": "Trade monitoring failed or timed out. Please check the dashboard for more details.",
                         }
                         
-                        send_performance_email(us.email, perf_data)
+                        send_performance_email(us.email, perf_data, us.user_sub)
                         print(f"   📧 Failure notification sent to {us.email}")
                     except Exception as e:
                         print(f"   [ERROR] Failed to send failure email to {us.email}: {e}")

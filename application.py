@@ -408,6 +408,8 @@ def delete_review(review_id):
 def send_contact_email():
     """Send contact form email via SES"""
     try:
+        print(f"📧 [CONTACT] Contact form submission received")
+        
         data = request.json or {}
         firstName = data.get("firstName", "").strip()
         lastName = data.get("lastName", "").strip()
@@ -416,8 +418,12 @@ def send_contact_email():
         subject = data.get("subject", "").strip()
         message = data.get("message", "").strip()
         
+        print(f"📧 [CONTACT] From: {firstName} {lastName} <{email}>")
+        print(f"📧 [CONTACT] Subject: {subject}")
+        
         # Validate required fields
         if not all([firstName, email, subject, message]):
+            print(f"❌ [CONTACT] Error: Missing required fields")
             return jsonify({"error": "Missing required fields"}), 400
         
         # Initialize SES client
@@ -477,6 +483,12 @@ MESSAGE:
 This is an automated message from DollaRaptor contact form.
 Reply to: {email}
         """
+        
+        # NOTE: Contact form emails do NOT check user email preferences because:
+        # 1. These are from non-authenticated users (no user_sub available)
+        # 2. These are administrative emails TO us, not notifications TO users
+        # 3. We always want to receive contact form submissions
+        print(f"📧 [CONTACT] Sending contact form email (no preference check - administrative email)")
         
         # Send email via SES
         response = ses_client.send_email(
@@ -624,29 +636,40 @@ def toggle_email_notifications(user_sub):
     Request body: {"email_notifications": true/false}
     """
     try:
+        print(f"📧 [EMAIL_TOGGLE] Request received for user {user_sub}")
+        
         data = request.json or {}
         email_notifications = data.get("email_notifications")
         
+        print(f"📧 [EMAIL_TOGGLE] Requested value: {email_notifications}")
+        
         # Validate input
         if email_notifications is None:
+            print(f"❌ [EMAIL_TOGGLE] Error: email_notifications field is required")
             return jsonify({"error": "email_notifications field is required"}), 400
         
         if not isinstance(email_notifications, bool):
+            print(f"❌ [EMAIL_TOGGLE] Error: email_notifications must be boolean, got {type(email_notifications)}")
             return jsonify({"error": "email_notifications must be true or false"}), 400
         
         with get_session_context() as session:
             user = session.query(User).filter_by(user_sub=user_sub).first()
             if not user:
+                print(f"❌ [EMAIL_TOGGLE] Error: User {user_sub} not found")
                 return jsonify({"error": "User not found"}), 404
             
-            # Update email notifications preference
+            # Log the change
             old_value = user.email_notifications
+            print(f"📧 [EMAIL_TOGGLE] Current value: {old_value} → New value: {email_notifications}")
+            
+            # Update email notifications preference
             user.email_notifications = email_notifications
             user.updated_at = datetime.utcnow()
             
-            # Log the change
+            # Log the database update
             status = "enabled" if email_notifications else "disabled"
-            print(f"📧 Email notifications {status} for user {user_sub} (was: {old_value})")
+            print(f"✅ [EMAIL_TOGGLE] Database updated: Email notifications {status} for user {user_sub}")
+            print(f"📧 [EMAIL_TOGGLE] Previous value: {old_value}, New value: {email_notifications}")
             
             return jsonify({
                 "ok": True,
@@ -656,7 +679,7 @@ def toggle_email_notifications(user_sub):
             }), 200
             
     except Exception as e:
-        print(f"Error toggling email notifications: {e}")
+        print(f"❌ [EMAIL_TOGGLE] Error toggling email notifications for user {user_sub}: {e}")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 

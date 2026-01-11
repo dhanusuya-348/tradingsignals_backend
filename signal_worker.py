@@ -127,12 +127,13 @@ def process_all_coins():
                         body_html = format_signal_email(signal_data)
                         body_text = f"Signal for {symbol}: {sig_type}\n\nConfidence: {signal_data.get('confidence', 0)}%\nSentiment: {signal_data.get('sentiment', 'N/A')}"
 
-                        # Send email
+                        # Send email with user_sub for preference checking
                         success = send_email(
                             to_email=w.email,
                             subject=subject,
                             body_text=body_text,
-                            body_html=body_html
+                            body_html=body_html,
+                            user_sub=w.user_sub  # FIXED: Now passing user_sub
                         )
 
                         # Update delivery status

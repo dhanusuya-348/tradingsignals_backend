@@ -443,17 +443,48 @@ def format_performance_email(perf_data):
     return body_html
 
 
-def send_performance_email(to_email, perf_data, user_sub=None):
+def get_user_sub_from_email(email):
+    """
+    Look up user_sub by email address.
+    This is useful when you only have the email but need the user_sub for preference checking.
+    
+    Args:
+        email: User's email address
+    
+    Returns:
+        user_sub if found, None otherwise
+    """
+    try:
+        from models import get_session_context, User
+        with get_session_context() as session:
+            user = session.query(User).filter_by(email=email).first()
+            if user:
+                print(f"🔍 [EMAIL_LOOKUP] Found user_sub {user.user_sub} for email {email}")
+                return user.user_sub
+            else:
+                print(f"🔍 [EMAIL_LOOKUP] No user found for email {email}")
+                return None
+    except Exception as e:
+        print(f"⚠️ [EMAIL_LOOKUP] Error looking up user_sub for {email}: {e}")
+        return None
+
+
+def send_performance_email(to_email, perf_data, user_sub):
     """
     Send performance report email via AWS SES
     
     Args:
         to_email: recipient email address
         perf_data: performance data dictionary
-        user_sub: user ID to check email preferences (optional)
+        user_sub: user ID (REQUIRED for email preference check)
+    
+    Returns:
+        True if sent or skipped (due to preference), False if error
     """
     symbol = perf_data.get("symbol", "UNKNOWN")
     final_result = perf_data.get("final_result", "UNKNOWN")
+    
+    print(f"📧 [PERF_EMAIL] Sending performance email for {symbol} to {to_email} (user: {user_sub})")
     
     # Create subject with emoji based on result
     emoji_map = {"SUCCESS": "🎉", "FAILURE": "📉", "ERROR": "⚠️"}
@@ -463,35 +494,67 @@ def send_performance_email(to_email, perf_data, user_sub=None):
     
     body_html = format_performance_email(perf_data)
     
-    return send_email(to_email, subject, body_html=body_html, user_sub=user_sub)
+    result = send_email(to_email, subject, body_html=body_html, user_sub=user_sub)
+    
+    if result:
+        print(f"✅ [PERF_EMAIL] Performance email sent successfully for {symbol}")
+    else:
+        print(f"❌ [PERF_EMAIL] Failed to send performance email for {symbol}")
+    
+    return result
 
 def send_email(to_email, subject, body_text=None, body_html=None, user_sub=None):
     """
     Send email via AWS SES with error handling
     
-    NEW: Checks user's email_notifications preference before sending
-    If user_sub is provided, checks if user has email notifications enabled
-    If disabled, skips sending silently (no error)
+    Checks user's email_notifications preference before sending.
+    If user_sub is provided, checks if user has email notifications enabled.
+    If disabled, skips sending and logs it.
+    If the user doesn't exist or there's an error checking preferences, logs a warning but still sends the email (fail-open).
+    
+    Args:
+        to_email: recipient email address
+        subject: email subject
+        body_text: plain text body (optional)
+        body_html: HTML body (optional)
+        user_sub: user ID for preference checking (optional)
+    
+    Returns:
+        True if sent or skipped (due to preference), False if error
     """
+    print(f"📧 [SES] send_email called: to={to_email}, subject='{subject}', user_sub={user_sub}")
+    
     if body_html is None and body_text is None:
+        print(f"❌ [SES] Error: Either body_text or body_html must be provided")
         raise ValueError("Either body_text or body_html must be provided")
 
     if body_html is None:
         body_html = f"<html><body>{body_text}</body></html>"
 
-    # NEW: Check email notifications preference if user_sub is provided
+    # Check email notifications preference if user_sub is provided
     if user_sub:
+        print(f"🔍 [SES] Checking email preferences for user {user_sub}")
         try:
             from models import get_session_context, User
             with get_session_context() as session:
                 user = session.query(User).filter_by(user_sub=user_sub).first()
-                if user and not user.email_notifications:
-                    print(f"📧 [SES] Email notifications disabled for user {user_sub}, skipping email to {to_email}")
-                    return True  # Return success to avoid breaking existing flows
+                if user:
+                    print(f"👤 [SES] User found: {user.email}, email_notifications={user.email_notifications}")
+                    if not user.email_notifications:
+                        print(f"📧 [SES] ✋ Email notifications DISABLED for user {user_sub}, skipping email to {to_email}")
+                        return True  # Return success to avoid breaking existing flows
+                    else:
+                        print(f"📧 [SES] ✅ Email notifications ENABLED for user {user_sub}, proceeding with send")
+                else:
+                    print(f"⚠️ [SES] User {user_sub} not found in database, proceeding with send (fail-open)")
         except Exception as e:
             print(f"⚠️ [SES] Could not check email preference for {user_sub}: {e}")
+            print(f"⚠️ [SES] Proceeding with email send (fail-open behavior)")
             # Continue with sending email if we can't check preference
+    else:
+        print(f"📧 [SES] No user_sub provided, skipping preference check")
 
+    print(f"📤 [SES] Attempting to send email via AWS SES...")
     try:
         response = ses_client.send_email(
             Source=SENDER,
@@ -504,41 +567,58 @@ def send_email(to_email, subject, body_text=None, body_html=None, user_sub=None)
                 },
             },
         )
-        print(f"✅ [SES] Email sent to {to_email}")
-        print(f"   MessageId: {response['MessageId']}")
+        print(f"✅ [SES] Email sent successfully to {to_email}")
+        print(f"📧 [SES] MessageId: {response['MessageId']}")
+        print(f"📧 [SES] Subject: {subject}")
         return True
     except ClientError as e:
         error_code = e.response['Error']['Code']
         error_msg = e.response['Error']['Message']
         
-        print(f"\n❌ [SES] Failed to send email")
-        print(f"   Error Code: {error_code}")
-        print(f"   Message: {error_msg}")
-        print(f"   Recipient: {to_email}")
+        print(f"❌ [SES] Failed to send email to {to_email}")
+        print(f"❌ [SES] Error Code: {error_code}")
+        print(f"❌ [SES] Message: {error_msg}")
+        print(f"❌ [SES] Subject: {subject}")
         
         # Provide specific troubleshooting
         if error_code == "InvalidParameterValue":
-            print("   → Check that your sender email is verified in AWS SES")
+            print(f"💡 [SES] → Check that your sender email is verified in AWS SES")
         elif error_code == "AuthFailure":
-            print("   → Check your AWS credentials (Access Key & Secret Key)")
+            print(f"💡 [SES] → Check your AWS credentials (Access Key & Secret Key)")
         elif error_code == "MessageRejected":
-            print("   → Check if recipient email is verified (you're in Sandbox mode)")
+            print(f"💡 [SES] → Check if recipient email is verified (you're in Sandbox mode)")
         
+        return False
+    except Exception as e:
+        print(f"❌ [SES] Unexpected error sending email to {to_email}: {e}")
         return False
 
 
 # Quick local test
 if __name__ == "__main__":
-    # First, check SES configuration
+    import sys
+    from datetime import datetime, timedelta
+    
+    # ✅ CHANGE THESE TO YOUR VALUES
+    TEST_USER_SUB = "492e7498-30d1-7070-2185-54303665d035"  # Your user_sub
+    TEST_EMAIL = "dhanurk25@gmail.com"                   # Your email
+    
+    print("\n" + "="*70)
+    print("🧪 EMAIL NOTIFICATIONS PREFERENCE TEST")
+    print("="*70)
+    print(f"\n📋 Testing with:")
+    print(f"   User Sub: {TEST_USER_SUB}")
+    print(f"   Email: {TEST_EMAIL}")
+    
+    # Check SES first
     config_ok = check_ses_configuration()
-    
     if not config_ok:
-        print("\n⛔ SES configuration issues detected. Fix them before sending emails!")
-        exit(1)
+        print("\n⛔ SES configuration issues detected!")
+        sys.exit(1)
     
-    # Fake data for preview - with various datetime formats to test
+    # Create test signal
     test_signal = {
-        "symbol": "BNB",
+        "symbol": "BTC",
         "interval": "1h",
         "ltf": "15m",
         "htf": "4h",
@@ -560,27 +640,92 @@ if __name__ == "__main__":
         },
         "decision": "APPROVED",
         "timing": {
-            "start": "2025-09-29 09:35:04.094713",      # Database format with microseconds
-            "end": "2025-09-29 10:05:04.094713",        # Database format with microseconds
+            "start": "2025-09-29 09:35:04.094713",
+            "end": "2025-09-29 10:05:04.094713",
             "duration": "~30 minutes"
         }
     }
 
     print("\n" + "="*70)
-    print("TESTING EMAIL SEND")
+    print("FORMATTING EMAIL")
     print("="*70)
     
     html = format_signal_email(test_signal)
-    success = send_email("dhanurk25@gmail.com", "🚀 BNB Signal Alert - BUY", body_html=html)
+    print("✅ Email formatted")
     
+    print("\n" + "="*70)
+    print("SENDING EMAIL WITH USER_SUB (PREFERENCE CHECK)")
+    print("="*70)
+    
+    # ✅ CRITICAL: Pass user_sub for preference checking!
+    success = send_email(
+        to_email=TEST_EMAIL,
+        subject="🧪 TEST: BNB BUY Signal - Check Preferences",
+        body_html=html,
+        user_sub=TEST_USER_SUB  # ✅ THIS IS THE FIX!
+    )
+    
+    print("\n" + "="*70)
     if success:
-        print("\n" + "="*70)
-        print("✅ EMAIL SENT SUCCESSFULLY!")
-        print("="*70)
+        print("✅ TEST COMPLETE - Check results above")
     else:
-        print("\n" + "="*70)
-        print("❌ EMAIL FAILED - CHECK ERROR MESSAGES ABOVE")
-        print("="*70)
+        print("❌ TEST FAILED")
+    print("="*70)
+
+# # Quick local test
+# if __name__ == "__main__":
+#     # First, check SES configuration
+#     config_ok = check_ses_configuration()
+    
+#     if not config_ok:
+#         print("\n⛔ SES configuration issues detected. Fix them before sending emails!")
+#         exit(1)
+    
+#     # Fake data for preview - with various datetime formats to test
+#     test_signal = {
+#         "symbol": "BNB",
+#         "interval": "1h",
+#         "ltf": "15m",
+#         "htf": "4h",
+#         "signal": "BUY",
+#         "confidence": 62,
+#         "price": 1188.19,
+#         "sentiment": "bullish",
+#         "indicators": {
+#             "15m": {"macd": "bullish", "rsi_value": 57.32, "rsi_signal": "neutral", "bb": "within_range", "volatility": "medium"},
+#             "1h": {"macd": "bearish", "rsi_value": 52.93, "rsi_signal": "neutral", "bb": "within_range", "volatility": "medium"},
+#             "4h": {"macd": "bullish", "rsi_value": 65.5, "rsi_signal": "neutral", "bb": "breakout_up", "volatility": "low"},
+#         },
+#         "risk": {
+#             "risk_reward_label": "1:2.84",
+#             "suggested_stop_loss": 1177.65,
+#             "suggested_take_profit": 1218.11,
+#             "expected_profit_percent": 2.52,
+#             "risk_level": "low"
+#         },
+#         "decision": "APPROVED",
+#         "timing": {
+#             "start": "2025-09-29 09:35:04.094713",      # Database format with microseconds
+#             "end": "2025-09-29 10:05:04.094713",        # Database format with microseconds
+#             "duration": "~30 minutes"
+#         }
+#     }
+
+#     print("\n" + "="*70)
+#     print("TESTING EMAIL SEND")
+#     print("="*70)
+    
+#     html = format_signal_email(test_signal)
+#     success = send_email("dhanurk25@gmail.com", "🚀 BNB Signal Alert - BUY", body_html=html)
+    
+#     if success:
+#         print("\n" + "="*70)
+#         print("✅ EMAIL SENT SUCCESSFULLY!")
+#         print("="*70)
+#     else:
+#         print("\n" + "="*70)
+#         print("❌ EMAIL FAILED - CHECK ERROR MESSAGES ABOVE")
+#         print("="*70)
 
 # #notifications.py
 # import os
