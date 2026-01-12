@@ -155,7 +155,6 @@ class User(Base):
     stripe_customer_id = Column(String, nullable=True, unique=True)                 # Stripe customer ID
     stripe_subscription_id = Column(String, nullable=True)                          # Stripe subscription ID
     subscription_date = Column(DateTime, nullable=True)                             # When user subscribed
-    expiry_date = Column(DateTime, nullable=True)                                   # When subscription expires
     
     # Timestamps
     created_at = Column(DateTime, nullable=False)
@@ -165,16 +164,6 @@ class User(Base):
         return (f"<User(user_sub={self.user_sub}, email={self.email}, "
                 f"plan={self.subscription_plan}, status={self.subscription_status}, "
                 f"email_notifications={self.email_notifications})>")
-    
-    def has_active_subscription(self):
-        """Check if user has an active, non-expired subscription"""
-        if self.subscription_plan in ['free', None]:
-            return False
-        if self.subscription_status != 'active':
-            return False
-        if self.expiry_date and datetime.utcnow() > self.expiry_date:
-            return False
-        return True
 
 # ==========================
 # DATABASE ENGINE & SESSIONS
